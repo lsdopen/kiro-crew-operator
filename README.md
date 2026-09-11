@@ -186,8 +186,11 @@ kubectl get kirocrew seagyn -o jsonpath='{.status.tailnetLoginURL}'
 
 The chart and the operator image are published to GHCR by
 [.github/workflows/release.yml](.github/workflows/release.yml) on every `v*` tag.
-Both are private to the `lsdopen` org, so `helm registry login ghcr.io` with a
-token carrying `read:packages` is needed first.
+
+If `helm install` reports `unauthorized`, the GHCR **package** is still private:
+package visibility is set per package and is not inherited from the repository, so
+each one has to be made public once under its own *Package settings → Change
+visibility*.
 
 ## Releasing
 

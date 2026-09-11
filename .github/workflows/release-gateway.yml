@@ -1,10 +1,16 @@
-name: Release gateway image
+name: Gateway image
 
 # The gateway image tracks UPSTREAM KiroCrew, not this operator's version, so it
 # releases on its own cadence and the operator's v* tags stay independent. A
-# Dependabot PR bumping the base digest in images/gateway/Containerfile is the
+# Dependabot PR bumping a base digest in images/gateway/Containerfile is the
 # normal trigger: merging it to main republishes the image, so a new upstream
 # KiroCrew release reaches crews without an operator release.
+#
+# A pull request BUILDS BUT DOES NOT PUBLISH. That is not a release running in a
+# PR — it is the only way to know a base bump is safe before it reaches main, and
+# it has already earned its keep: Dependabot's node 22 -> 26 bump failed here on a
+# missing libatomic instead of breaking every crew's image. The job name says
+# which mode it is in, and the login and push steps are skipped entirely.
 on:
   push:
     branches:
@@ -12,8 +18,6 @@ on:
     paths:
       - images/gateway/**
       - .github/workflows/release-gateway.yml
-  # Build without publishing on a PR, so a broken Containerfile fails in review
-  # rather than on main. The in-build tool checks are the point of this.
   pull_request:
     paths:
       - images/gateway/**
@@ -32,11 +36,13 @@ env:
 
 jobs:
   gateway:
-    name: Build and publish
+    # Say plainly which mode this run is in, so a PR check never claims to publish.
+    name: ${{ github.event_name == 'pull_request' && 'Verify (no publish)' || 'Build and publish' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      security-events: write
     steps:
       - name: Clone the code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -46,7 +52,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
-      # A pull_request build is verification only, so it needs no credential.
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
@@ -55,47 +60,118 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The version the image is pegged to comes from the base image's own
-      # label, not from anything we maintain by hand, so the published tag says
-      # which upstream release it actually carries.
+      # The version the image is pegged to comes from the base image itself, not
+      # from anything we maintain by hand, so the published tag says which
+      # upstream release it actually carries.
+      #
+      # An earlier build published the useless tag "kirocrew-unknown" because
+      # `.Image.Config.Labels` resolves to nothing on a multi-arch ref, where
+      # `.Image` is a map keyed by platform rather than a single config. Reading
+      # the flattened JSON sidesteps that. The label is preferred over the
+      # KIROCREW_VERSION env because the config also embeds build history in
+      # which that env appears followed by other variables, so an env match can
+      # pick up trailing text and yield a tag containing a space.
       - name: Resolve the upstream KiroCrew version
         id: upstream
         run: |
+          set -euo pipefail
           BASE="$(grep -oE '^FROM ghcr\.io/kirodotdev/kirocrew[^ ]+' images/gateway/Containerfile | sed 's/^FROM //')"
           echo "base=${BASE}" >> "$GITHUB_OUTPUT"
-          VERSION="$(docker buildx imagetools inspect "${BASE}" --format '{{ index .Image.Config.Labels "org.opencontainers.image.version" }}' 2>/dev/null | head -1)"
-          # A missing or unexpected label must not silently produce a tag like
-          # "kirocrew-" that says nothing about what is inside.
-          case "${VERSION}" in
-            ''|*'<no value>'*|*'not found'*) VERSION="unknown" ;;
-          esac
+          CFG="$(docker buildx imagetools inspect "${BASE}" --format '{{json .Image}}')"
+          VERSION="$(printf '%s' "$CFG" \
+            | grep -oE '"org\.opencontainers\.image\.version":"[^"]+"' \
+            | head -1 | cut -d'"' -f4 || true)"
+          if [ -z "${VERSION}" ]; then
+            VERSION="$(printf '%s' "$CFG" \
+              | grep -oE 'KIROCREW_VERSION=[^" ]+' | head -1 | cut -d= -f2 || true)"
+          fi
+          # A tag is immutable once pushed, so refuse anything that is not a clean
+          # version rather than publishing a malformed or misleading one.
+          if ! printf '%s' "${VERSION}" | grep -qE '^[0-9A-Za-z][0-9A-Za-z._+-]*$'; then
+            echo "::warning::Could not read a usable version from ${BASE} (got '${VERSION}'); tagging by commit only"
+            VERSION=""
+          fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Pegged to upstream KiroCrew ${VERSION} (${BASE})"
+          echo "Pegged to upstream KiroCrew ${VERSION:-<unknown>} (${BASE})"
 
-      - name: Build and push
+      # Tags are computed here so the publish step stays declarative, and so an
+      # unreadable upstream version omits that tag instead of publishing a lie.
+      - name: Compute tags
+        id: tags
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          IMG="${REGISTRY}/${{ github.repository_owner }}/${IMAGE_NAME}"
+          {
+            echo "list<<EOF"
+            echo "${IMG}:latest"
+            [ -n "${{ steps.upstream.outputs.version }}" ] && echo "${IMG}:kirocrew-${{ steps.upstream.outputs.version }}"
+            echo "${IMG}:sha-${GITHUB_SHA}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # One build per run. A PR builds a single arch and loads it locally so the
+      # scan below has something to read; paying for the arm64 leg to verify a
+      # base bump buys nothing. A publish builds both arches and pushes.
+      - name: Verify the image builds
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: images/gateway/Containerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and publish
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
           file: images/gateway/Containerfile
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:kirocrew-${{ steps.upstream.outputs.version }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          push: true
+          tags: ${{ steps.tags.outputs.list }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Scanning lives here rather than in security.yml so the image is built
+      # ONCE per event. On a PR it scans what was just loaded; on a publish it
+      # scans the pushed image by its immutable commit tag.
+      #
+      # Reports without failing. Nearly every finding belongs to upstream's base
+      # or to Debian, and blocking on a CVE we cannot patch would only teach
+      # everyone to ignore a red build. The fix arrives as a Dependabot base bump.
+      - name: Scan the image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ github.event_name == 'pull_request' && format('{0}:scan', env.IMAGE_NAME) || format('{0}/{1}/{2}:sha-{3}', env.REGISTRY, github.repository_owner, env.IMAGE_NAME, github.sha) }}
+          scan-type: image
+          format: sarif
+          output: trivy-image.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@0499de31b99561a6d14a36a5f662c2a54f91beee # v4.31.2
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
 
       - name: Summarise
         run: |
           {
             echo "### Gateway image"
             echo
-            echo "Pegged to upstream KiroCrew \`${{ steps.upstream.outputs.version }}\`"
+            echo "Upstream KiroCrew: \`${{ steps.upstream.outputs.version || 'unknown' }}\`"
             echo
             echo "Base: \`${{ steps.upstream.outputs.base }}\`"
             if [ "${{ github.event_name }}" = "pull_request" ]; then
               echo
-              echo "Verification build only — not published."
+              echo "Verification build only (linux/amd64) — nothing published."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
