@@ -65,12 +65,6 @@ rules:
 - apiGroups:
   - kirocrew.lsdopen.io
   resources:
-  - kirocrews/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - kirocrew.lsdopen.io
-  resources:
   - kirocrews/status
   verbs:
   - get
