@@ -16,7 +16,7 @@ updates:
       interval: daily
     open-pull-requests-limit: 5
     commit-message:
-      prefix: "gateway"
+      prefix: "deps"
     labels:
       - dependencies
       - gateway-image
@@ -50,6 +50,6 @@ updates:
     schedule:
       interval: weekly
     commit-message:
-      prefix: "operator-image"
+      prefix: "deps"
     labels:
       - dependencies

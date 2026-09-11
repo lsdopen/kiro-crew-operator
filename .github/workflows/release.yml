@@ -1,8 +1,18 @@
 name: Release
 
-# Releases are cut by pushing a tag by hand — there is no tag-on-merge
-# automation, so this workflow is the whole release trigger.
+# Publishes the operator image and chart for a version. Two triggers, one path:
+#
+#   release: published — the normal, automated route. release-please merges its
+#     release PR and publishes a GitHub Release; this fires even though the tag
+#     was created with GITHUB_TOKEN (a tag push from that token deliberately does
+#     NOT trigger `push: tags`, so relying on that alone would silently never
+#     publish an automated release).
+#
+#   push: tags v* — a manual escape hatch. A hand-pushed tag still publishes, so
+#     a release can be cut without release-please if ever needed.
 on:
+  release:
+    types: [published]
   push:
     tags:
       - "v*"
@@ -25,11 +35,19 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          # A release event checks out the default branch, not the tag, so pin
+          # the ref to the released tag explicitly. github.ref is the tag for a
+          # push and refs/tags/<name> for a release, so both resolve correctly.
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
 
       - name: Derive versions from the tag
         id: version
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
+          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
           # Charts and OCI tags take the bare semver; the image keeps the v.
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "chart=${TAG#v}" >> "$GITHUB_OUTPUT"

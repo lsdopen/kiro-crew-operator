@@ -1,0 +1,41 @@
+name: Release please
+
+# Fully automated release-on-merge for the OPERATOR stream only (its image and
+# the chart). The gateway image is deliberately unversioned and is not touched
+# here — see release-gateway.yml.
+#
+# How it works, and why there is no hand tag any more:
+#   1. Every push to main, release-please reads the Conventional Commit messages
+#      since the last release and maintains a "release PR" that bumps the version,
+#      rewrites CHANGELOG.md, and bumps dist/chart/Chart.yaml (version + appVersion,
+#      via extra-files in release-please-config.json).
+#   2. Merging that PR is the release decision — a human still gates it, which is
+#      what keeps GPG-signed history and review on main intact even though the
+#      version itself is computed rather than chosen.
+#   3. On merge, release-please pushes the vX.Y.Z tag, which triggers release.yml
+#      to publish the image and chart. The two workflows compose: this one decides
+#      the version, that one ships it.
+#
+# The bot commits (the release PR, the changelog) are authored via the GitHub API
+# with GITHUB_TOKEN, so they carry GitHub's own web-flow "Verified" signature.
+# They are the only commits on main not signed with the maintainer's GPG key.
+on:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # create the release PR, the tag and the GitHub release
+      pull-requests: write    # open and update the release PR
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          # A repo-scoped config + manifest so the version and the Chart.yaml bump
+          # are versioned in the tree rather than inferred from action inputs.
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
