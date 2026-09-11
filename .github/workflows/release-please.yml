@@ -32,10 +32,29 @@ jobs:
     permissions:
       contents: write        # create the release PR, the tag and the GitHub release
       pull-requests: write    # open and update the release PR
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
         with:
           # A repo-scoped config + manifest so the version and the Chart.yaml bump
           # are versioned in the tree rather than inferred from action inputs.
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # Publish in the SAME workflow run when release-please cut a release. This must
+  # not be a separate workflow keyed on the release/tag event: those events are
+  # created with GITHUB_TOKEN and GitHub's recursion guard means they never start
+  # a new run, so an automated release would tag but never publish. Calling the
+  # reusable workflow sidesteps the guard entirely.
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}

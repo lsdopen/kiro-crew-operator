@@ -1,21 +1,28 @@
 name: Release
 
-# Publishes the operator image and chart for a version. Two triggers, one path:
+# Publishes the operator image and chart for a version. It never relies on a
+# GITHUB_TOKEN-created event to trigger it, because such events deliberately do
+# NOT start new workflow runs (GitHub's recursion guard) — release-please tags
+# and releases with GITHUB_TOKEN, so a `release: published` or `push: tags`
+# trigger here would silently never fire for an automated release. Instead:
 #
-#   release: published — the normal, automated route. release-please merges its
-#     release PR and publishes a GitHub Release; this fires even though the tag
-#     was created with GITHUB_TOKEN (a tag push from that token deliberately does
-#     NOT trigger `push: tags`, so relying on that alone would silently never
-#     publish an automated release).
-#
-#   push: tags v* — a manual escape hatch. A hand-pushed tag still publishes, so
-#     a release can be cut without release-please if ever needed.
+#   workflow_call — release-please.yml calls this in the SAME run when it created
+#     a release, so no second event is needed. This is the normal path.
+#   workflow_dispatch — a manual button to (re)publish a given tag, e.g. to
+#     recover a release whose publish was missed.
 on:
-  release:
-    types: [published]
-  push:
-    tags:
-      - "v*"
+  workflow_call:
+    inputs:
+      tag:
+        description: The vX.Y.Z tag to publish
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The vX.Y.Z tag to publish
+        required: true
+        type: string
 
 permissions: {}
 
@@ -35,19 +42,13 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-          # A release event checks out the default branch, not the tag, so pin
-          # the ref to the released tag explicitly. github.ref is the tag for a
-          # push and refs/tags/<name> for a release, so both resolve correctly.
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+          # Check out the exact tag being published, not the branch head.
+          ref: ${{ inputs.tag }}
 
       - name: Derive versions from the tag
         id: version
         run: |
-          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-          else
-            TAG="${GITHUB_REF#refs/tags/}"
-          fi
+          TAG="${{ inputs.tag }}"
           # Charts and OCI tags take the bare semver; the image keeps the v.
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "chart=${TAG#v}" >> "$GITHUB_OUTPUT"
