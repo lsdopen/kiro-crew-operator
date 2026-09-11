@@ -31,7 +31,7 @@ FROM ghcr.io/tailscale/tailscale:stable@sha256:8c42c4574ab066384fcb72f69e086a2ff
 
 # trixie-slim matches the base image's own Debian release, so the runtime's
 # glibc is the one node was built against.
-FROM docker.io/library/node:22-trixie-slim@sha256:7b8a0c89c54499bee567618f96578e1a12a800f062fbdbfd1fb6a443fa6f6284 AS node
+FROM docker.io/library/node:26-trixie-slim@sha256:14bf3eac4bf209d906d3c41256597d3ab1f926b2e93a79e9bdfe1efd32454239 AS node
 
 FROM ghcr.io/kirodotdev/kirocrew:stable@sha256:ba01bb1c75ea454af2b53773f39c3b38899f0d1d9ab51a0eb97001df6db27407
 
