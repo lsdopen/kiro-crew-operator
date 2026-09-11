@@ -57,10 +57,18 @@ COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=tailscale /usr/local/bin/tailscale /usr/local/bin/tailscale
 
 RUN set -eux; \
+    # node is copied as a bare binary, but it is dynamically linked against more
+    # than libc: from node 26 on it needs libatomic, which the Python base does
+    # not ship. Installing it from the base's own apt repo keeps the ABI matched
+    # to this image's glibc and is arch-correct on both amd64 and arm64, which
+    # copying the .so out of the node stage would not be.
+    apt-get update; \
+    apt-get install -y --no-install-recommends libatomic1; \
+    rm -rf /var/lib/apt/lists/*; \
     ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm; \
     ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx; \
     # Fail the build now rather than ship an image whose tools are missing or
-    # cannot execute on this libc.
+    # cannot execute on this libc. This is what caught the missing libatomic.
     uv --version; \
     uvx --version; \
     node --version; \
