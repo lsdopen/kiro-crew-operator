@@ -1,7 +1,12 @@
 # Build the manager binary
 # Override BASE_IMAGE to build from another registry, e.g. docker.io/library/golang:1.26
 ARG BASE_IMAGE=golang:1.26
-FROM ${BASE_IMAGE} AS builder
+# --platform pins the builder to the machine doing the building, so a multi-arch
+# build cross-compiles with Go instead of running the whole toolchain under QEMU.
+# Without it, `go build -a` rebuilds the standard library emulated for every
+# non-native target, which took over 35 minutes for linux/arm64 on an amd64
+# runner. Go cross-compiles for free, so TARGETARCH below does the real work.
+FROM --platform=${BUILDPLATFORM} ${BASE_IMAGE} AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
