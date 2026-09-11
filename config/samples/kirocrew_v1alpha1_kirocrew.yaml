@@ -1,0 +1,31 @@
+apiVersion: kirocrew.lsdopen.io/v1alpha1
+kind: KiroCrew
+metadata:
+  name: seagyn
+  namespace: kiro-crew
+spec:
+  # The tailnet identity that owns this crew. This is the instance's identity
+  # boundary: the crew holds this person's own Kiro token, so their agent activity
+  # draws down their credits, and the tailnet's autogroup:self grant means they are
+  # the only human who can reach it.
+  owner: seagyn@lsdopen.io
+
+  # mini | light | development | power
+  size: light
+
+  storage:
+    # Must be block storage. Kiro Crew keeps its SQLite databases in WAL mode,
+    # which is not supported on a network filesystem such as EFS.
+    storageClassName: gp3
+
+  tailscale:
+    # Becomes the MagicDNS name, so the dashboard ends up at
+    # https://kiro-crew-seagyn.<tailnet>.ts.net once the node is authenticated.
+    hostname: kiro-crew-seagyn
+
+  aws:
+    # IRSA for the crew itself (Bedrock, S3, ...). The operator needs no AWS access.
+    roleARN: ""
+
+  # Optional ConfigMap holding mcp-servers.json.
+  mcpConfigRef: ""
