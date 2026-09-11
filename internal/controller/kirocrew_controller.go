@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -53,7 +54,13 @@ const (
 	// recognisable prefix.
 	namePrefix = "kiro-crew"
 
-	finalizerName = "kirocrew.lsdopen.io/finalizer"
+	// dataVolumeName is the single persistent volume every instance owns: the
+	// gateway's KIROCREW_HOME and the tailnet node identity both live on it.
+	dataVolumeName = "data"
+
+	// tailscaleContainerName is the sidecar's name, and also the subPath its
+	// state occupies on the data volume.
+	tailscaleContainerName = "tailscale"
 
 	// tailnetPollInterval is how often to re-check a node that has not yet been
 	// authenticated by its owner.
@@ -83,7 +90,6 @@ type KiroCrewReconciler struct {
 
 // +kubebuilder:rbac:groups=kirocrew.lsdopen.io,resources=kirocrews,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kirocrew.lsdopen.io,resources=kirocrews/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=kirocrew.lsdopen.io,resources=kirocrews/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch
@@ -105,24 +111,12 @@ func (r *KiroCrewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
+	// Deletion needs no finalizer: owner references garbage-collect every
+	// generated object, and the operator holds no external state to unwind — it
+	// writes no tailnet ACLs and no cloud resources. A finalizer here would only
+	// be able to stall deletion while the operator is unavailable.
 	if !crew.DeletionTimestamp.IsZero() {
-		// Owner references garbage-collect every generated object, and the
-		// operator holds no external state (it writes no tailnet ACLs and no
-		// cloud resources), so there is nothing to unwind here.
-		if controllerutil.ContainsFinalizer(&crew, finalizerName) {
-			controllerutil.RemoveFinalizer(&crew, finalizerName)
-			if err := r.Update(ctx, &crew); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
 		return ctrl.Result{}, nil
-	}
-
-	if !controllerutil.ContainsFinalizer(&crew, finalizerName) {
-		controllerutil.AddFinalizer(&crew, finalizerName)
-		if err := r.Update(ctx, &crew); err != nil {
-			return ctrl.Result{}, err
-		}
 	}
 
 	if err := r.reconcileServiceAccount(ctx, &crew); err != nil {
@@ -299,13 +293,14 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 		sts.Labels = labels
 		replicas := int32(1)
 		runAsNonRoot := true
+		allowPrivilegeEscalation := false
 		readOnlyRootFS := false // the gateway writes scratch under KIROCREW_HOME
 
 		sts.Spec.Replicas = &replicas
 		sts.Spec.ServiceName = instanceName(crew)
 		sts.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
 
-		sts.Spec.Template.ObjectMeta.Labels = labels
+		sts.Spec.Template.Labels = labels
 		sts.Spec.Template.Spec.ServiceAccountName = instanceName(crew)
 		sts.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
 			RunAsNonRoot: &runAsNonRoot,
@@ -324,7 +319,7 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 		}
 
 		gatewayMounts := []corev1.VolumeMount{
-			{Name: "data", MountPath: dataMountPath},
+			{Name: dataVolumeName, MountPath: dataMountPath},
 			{Name: "config", MountPath: configMountPath, ReadOnly: true},
 		}
 		if crew.Spec.MCPConfigRef != "" {
@@ -347,7 +342,7 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 			Resources:       resources,
 			VolumeMounts:    gatewayMounts,
 			SecurityContext: &corev1.SecurityContext{
-				AllowPrivilegeEscalation: ptr(false),
+				AllowPrivilegeEscalation: &allowPrivilegeEscalation,
 				ReadOnlyRootFilesystem:   &readOnlyRootFS,
 				Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 			},
@@ -398,11 +393,11 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 		}
 
 		tailscale := corev1.Container{
-			Name:  "tailscale",
+			Name:  tailscaleContainerName,
 			Image: tailscaleImage,
 			Env:   tailscaleEnv,
 			VolumeMounts: []corev1.VolumeMount{
-				{Name: "data", MountPath: tailscaleStatePath, SubPath: "tailscale"},
+				{Name: dataVolumeName, MountPath: tailscaleStatePath, SubPath: tailscaleContainerName},
 			},
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
@@ -448,7 +443,7 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 		if sts.CreationTimestamp.IsZero() {
 			sts.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{
 				{
-					ObjectMeta: metav1.ObjectMeta{Name: "data"},
+					ObjectMeta: metav1.ObjectMeta{Name: dataVolumeName},
 					Spec: corev1.PersistentVolumeClaimSpec{
 						AccessModes: []corev1.PersistentVolumeAccessMode{
 							// One writer, and block storage: Kiro Crew's SQLite
@@ -565,7 +560,7 @@ func (r *KiroCrewReconciler) tailnetLoginURL(ctx context.Context, crew *kirocrew
 	raw, err := r.Clientset.CoreV1().
 		Pods(crew.Namespace).
 		GetLogs(pods.Items[0].Name, &corev1.PodLogOptions{
-			Container: "tailscale",
+			Container: tailscaleContainerName,
 			TailLines: &tail,
 		}).
 		DoRaw(ctx)
@@ -596,8 +591,6 @@ func upsertCondition(conditions *[]metav1.Condition, next metav1.Condition) {
 	}
 	*conditions = append(*conditions, next)
 }
-
-func ptr[T any](v T) *T { return &v }
 
 // SetupWithManager registers the controller.
 func (r *KiroCrewReconciler) SetupWithManager(mgr ctrl.Manager) error {

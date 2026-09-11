@@ -1,0 +1,109 @@
+name: Release
+
+# Releases are cut by pushing a tag by hand — there is no tag-on-merge
+# automation, so this workflow is the whole release trigger.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  release:
+    name: Publish image and chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required to push both the image and the chart to GHCR.
+      packages: write
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Derive versions from the tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          # Charts and OCI tags take the bare semver; the image keeps the v.
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "chart=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      # A tag whose version disagrees with the committed chart would publish a
+      # chart that claims a version nobody can reproduce from this tree.
+      - name: Verify the chart version matches the tag
+        run: |
+          CHART_VERSION="$(grep '^version:' dist/chart/Chart.yaml | awk '{print $2}')"
+          APP_VERSION="$(grep '^appVersion:' dist/chart/Chart.yaml | tr -d '"' | awk '{print $2}')"
+          EXPECTED="${{ steps.version.outputs.chart }}"
+          if [ "$CHART_VERSION" != "$EXPECTED" ] || [ "$APP_VERSION" != "$EXPECTED" ]; then
+            echo "Chart.yaml version=$CHART_VERSION appVersion=$APP_VERSION but tag implies $EXPECTED" >&2
+            echo "Bump dist/chart/Chart.yaml to match the tag before releasing" >&2
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the operator image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          # EKS node groups are commonly arm64 (Graviton) or amd64, and the
+          # operator is cheap to build for both.
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}:${{ steps.version.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository }}:${{ steps.version.outputs.chart }}
+            ${{ env.REGISTRY }}/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install Helm
+        uses: azure/setup-helm@1a275c3b69536ee54fdd11c19c5a226421b8a0e6 # v4.3.1
+
+      # values.yaml already defaults to the GHCR image; the bare-semver tag
+      # published above is what appVersion resolves to.
+      - name: Package the chart
+        run: |
+          helm package dist/chart \
+            --version "${{ steps.version.outputs.chart }}" \
+            --app-version "${{ steps.version.outputs.chart }}" \
+            --destination /tmp/chart
+          ls -la /tmp/chart
+
+      - name: Push the chart to GHCR as an OCI artifact
+        run: |
+          helm registry login ${{ env.REGISTRY }} \
+            --username '${{ github.actor }}' \
+            --password '${{ secrets.GITHUB_TOKEN }}'
+          helm push \
+            "/tmp/chart/kiro-crew-operator-${{ steps.version.outputs.chart }}.tgz" \
+            "oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts"
+
+      - name: Summarise the release
+        run: |
+          {
+            echo "### Released ${{ steps.version.outputs.tag }}"
+            echo
+            echo '```sh'
+            echo "helm install kiro-crew-operator \\"
+            echo "  oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/kiro-crew-operator \\"
+            echo "  --version ${{ steps.version.outputs.chart }} \\"
+            echo "  --namespace kiro-crew --create-namespace \\"
+            echo "  --set tailnet.domain=example-tailnet.ts.net"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

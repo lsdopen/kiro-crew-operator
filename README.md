@@ -120,7 +120,8 @@ enabled, and the policy from [docs/tailnet.md](docs/tailnet.md) applied.
 
 ```sh
 # Install
-helm install kiro-crew-operator ./dist/chart \
+helm install kiro-crew-operator \
+  oci://ghcr.io/lsdopen/charts/kiro-crew-operator --version 0.1.0 \
   --namespace kiro-crew --create-namespace \
   --set tailnet.domain=example-tailnet.ts.net
 
@@ -130,6 +131,23 @@ kubectl apply -f config/samples/kirocrew_v1alpha1_kirocrew.yaml
 # Give its owner the login URL
 kubectl get kirocrew seagyn -o jsonpath='{.status.tailnetLoginURL}'
 ```
+
+The chart and the operator image are published to GHCR by
+[.github/workflows/release.yml](.github/workflows/release.yml) on every `v*` tag.
+Both are private to the `lsdopen` org, so `helm registry login ghcr.io` with a
+token carrying `read:packages` is needed first.
+
+## Releasing
+
+Releases are tagged by hand — nothing tags on merge. Bump `version` and
+`appVersion` in `dist/chart/Chart.yaml` in the same change, then:
+
+```sh
+git tag -a v0.2.0 -m "..." && git push origin v0.2.0
+```
+
+The release workflow refuses a tag that disagrees with `Chart.yaml`, so the
+published chart version always matches the tag it was built from.
 
 ## Development
 
