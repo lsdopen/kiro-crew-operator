@@ -72,8 +72,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Uses the repo's own target rather than a third-party action, which is
+      # the same path test-chart.yml already exercises on every push.
       - name: Install Helm
-        uses: azure/setup-helm@1a275c3b69536ee54fdd11c19c5a226421b8a0e6 # v4.3.1
+        run: make install-helm
 
       # values.yaml already defaults to the GHCR image; the bare-semver tag
       # published above is what appVersion resolves to.
