@@ -72,8 +72,24 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Uses the repo's own target rather than a third-party action, which is
-      # the same path test-chart.yml already exercises on every push.
+      # The crew gateway image: upstream's minimal image plus uv, node and the
+      # tailscale CLI. Built here rather than by hand so the base digest it pins
+      # is whatever the commit says, and released in lockstep with the operator
+      # that defaults to it.
+      - name: Build and push the gateway image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: images/gateway/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/kiro-crew-gateway:${{ steps.version.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/kiro-crew-gateway:${{ steps.version.outputs.chart }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/kiro-crew-gateway:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Install Helm
         run: make install-helm
 

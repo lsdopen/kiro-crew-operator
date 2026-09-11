@@ -57,6 +57,33 @@ Tailscale SSH is not enabled. The dashboard is the interface and `kubectl exec`
 covers administrative access, so an SSH server on every crew would be a second way
 into a pod holding someone's Kiro token without adding a capability anyone needs.
 
+## The gateway image
+
+`spec.gateway.image` defaults to `ghcr.io/lsdopen/kiro-crew-gateway`, built from
+[images/gateway/Dockerfile](images/gateway/Dockerfile). It is upstream's own
+`ghcr.io/kirodotdev/kirocrew` — which already carries `kiro-cli`, the agent
+runtime — plus three things a crew on a cluster turns out to need:
+
+| Added | Why |
+|-------|-----|
+| `uv`, `uvx` | Most MCP servers are distributed as `uvx` commands |
+| `node`, `npm`, `npx` | The rest are `npx` commands; also any JS/TS repo work |
+| `tailscale` (CLI only) | The gateway resolves it from a fixed allowlist of absolute paths and never consults `PATH`; without it, its own tailnet status and serve paths report "Tailscale is not installed here" |
+
+Upstream's image is deliberately minimal — `ca-certificates`, `curl`, `git`,
+`ripgrep`, `tini`, `unzip` and Python — so on it a crew's MCP servers simply fail
+to start, which makes `spec.mcpConfigRef` close to decorative. Set
+`spec.gateway.image` to the upstream image to run it unmodified instead.
+
+`tailscaled` is **not** added: KiroCrew's entrypoint owns PID 1, so this container
+cannot supervise a second daemon. The daemon stays in the sidecar.
+
+Every base is pinned **by digest**, so a build is reproducible and picking up a
+new upstream release is a deliberate commit rather than a silent drift. Each added
+binary is executed during the build (`uv --version`, `node --version`,
+`tailscale version`, …) so a changed upstream layout fails the build instead of
+shipping a subtly broken image.
+
 ## Two one-time human approvals
 
 Provisioning a crew requires exactly two interactive steps, and neither can be
