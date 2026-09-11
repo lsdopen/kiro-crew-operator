@@ -194,18 +194,23 @@ visibility*.
 
 ## Releasing
 
-Two independent streams. The **operator** (its image and the chart) is tagged by
-hand — nothing tags on merge. Bump `version` and `appVersion` in
-`dist/chart/Chart.yaml` in the same change, then:
+Two independent streams.
 
-```sh
-git tag -a v0.2.0 -m "..." && git push origin v0.2.0
-```
+The **operator** (its image and the chart) is released automatically from
+Conventional Commit messages. [release-please](https://github.com/googleapis/release-please)
+maintains a **release PR** on `main` that bumps the version, rewrites
+`CHANGELOG.md` and bumps `dist/chart/Chart.yaml` — merging that PR is the release
+decision. On merge it tags `vX.Y.Z` and publishes a GitHub Release, which triggers
+[.github/workflows/release.yml](.github/workflows/release.yml) to push the image
+and chart. So the version is *computed* from commits, but a human still gates it
+by merging the PR, and `main` history stays reviewed and signed.
 
-The release workflow refuses a tag that disagrees with `Chart.yaml`, so the
-published chart version always matches the tag it was built from.
+This means commit messages matter: `feat:` → minor, `fix:`/`perf:`/`deps:` →
+patch, and a `!` or a `BREAKING CHANGE:` footer → major (minor while pre-1.0). A
+hand-pushed `v*` tag still works as an escape hatch if a release ever has to be
+cut without release-please.
 
-The **gateway image** is not tagged at all — it republishes whenever
+The **gateway image** is not versioned at all — it republishes whenever
 `images/gateway/**` changes on `main`, which is normally a merged Dependabot base
 bump. See [The gateway image](#it-releases-independently-of-the-operator).
 
