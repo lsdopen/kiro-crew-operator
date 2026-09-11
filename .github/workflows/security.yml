@@ -1,0 +1,156 @@
+name: Security
+
+# Now that the repo is public, GitHub's code scanning and Dependabot alerts are
+# free, so findings land in the Security tab rather than only in a log. Three
+# distinct classes of problem, because none of these subsumes another:
+#
+#   CodeQL       — bugs in the operator's own Go code
+#   govulncheck  — known CVEs in the modules it imports, filtered to the ones
+#                  actually reachable from our call graph
+#   Trivy config — Kubernetes misconfiguration in the chart and manifests we ship
+#   Trivy image  — OS and language CVEs in the gateway image's four bases
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    # A dependency becomes vulnerable while the code sits untouched, so a scan
+    # that only runs on push would go stale on a quiet week.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@0499de31b99561a6d14a36a5f662c2a54f91beee # v4.31.2
+        with:
+          languages: go
+          queries: security-extended
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@0499de31b99561a6d14a36a5f662c2a54f91beee # v4.31.2
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@0499de31b99561a6d14a36a5f662c2a54f91beee # v4.31.2
+
+  govulncheck:
+    name: Go vulnerabilities
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # This one DOES fail the build. Unlike a base-image CVE, a reachable vuln
+      # in a module we import is ours to fix by bumping it.
+      - name: Run govulncheck
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  config:
+    name: Manifest misconfiguration
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # Scans the Helm chart and kustomize manifests this repo ships. Note the
+      # deny-all NetworkPolicy and the deliberately absent CPU limits are design
+      # decisions documented in the README, so expect findings there and judge
+      # them rather than "fixing" them.
+      - name: Scan manifests with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy-config.sarif
+          severity: MEDIUM,HIGH,CRITICAL
+          exit-code: "0"
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@0499de31b99561a6d14a36a5f662c2a54f91beee # v4.31.2
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+
+  image:
+    name: Gateway image CVEs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      # Single-arch and loaded locally: this is a scan, not a release, so paying
+      # for the arm64 leg here buys nothing.
+      - name: Build the gateway image for scanning
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: images/gateway/Containerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: kiro-crew-gateway:scan
+          cache-from: type=gha
+
+      # Reports without failing. Nearly every finding here belongs to upstream's
+      # base or to Debian, and blocking our release on a CVE we cannot patch
+      # would only teach everyone to ignore a red build. The Security tab is
+      # where these get triaged, and the fix is a base bump Dependabot opens.
+      - name: Scan the image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: kiro-crew-gateway:scan
+          scan-type: image
+          format: sarif
+          output: trivy-image.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@0499de31b99561a6d14a36a5f662c2a54f91beee # v4.31.2
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
