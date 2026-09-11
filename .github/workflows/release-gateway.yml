@@ -1,0 +1,101 @@
+name: Release gateway image
+
+# The gateway image tracks UPSTREAM KiroCrew, not this operator's version, so it
+# releases on its own cadence and the operator's v* tags stay independent. A
+# Dependabot PR bumping the base digest in images/gateway/Containerfile is the
+# normal trigger: merging it to main republishes the image, so a new upstream
+# KiroCrew release reaches crews without an operator release.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - images/gateway/**
+      - .github/workflows/release-gateway.yml
+  # Build without publishing on a PR, so a broken Containerfile fails in review
+  # rather than on main. The in-build tool checks are the point of this.
+  pull_request:
+    paths:
+      - images/gateway/**
+      - .github/workflows/release-gateway.yml
+  # Weekly, to pick up a moved upstream tag even if Dependabot has not opened a
+  # PR yet, and to catch a base whose digest was retagged in place.
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: kiro-crew-gateway
+
+jobs:
+  gateway:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      # A pull_request build is verification only, so it needs no credential.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The version the image is pegged to comes from the base image's own
+      # label, not from anything we maintain by hand, so the published tag says
+      # which upstream release it actually carries.
+      - name: Resolve the upstream KiroCrew version
+        id: upstream
+        run: |
+          BASE="$(grep -oE '^FROM ghcr\.io/kirodotdev/kirocrew[^ ]+' images/gateway/Containerfile | sed 's/^FROM //')"
+          echo "base=${BASE}" >> "$GITHUB_OUTPUT"
+          VERSION="$(docker buildx imagetools inspect "${BASE}" --format '{{ index .Image.Config.Labels "org.opencontainers.image.version" }}' 2>/dev/null | head -1)"
+          # A missing or unexpected label must not silently produce a tag like
+          # "kirocrew-" that says nothing about what is inside.
+          case "${VERSION}" in
+            ''|*'<no value>'*|*'not found'*) VERSION="unknown" ;;
+          esac
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Pegged to upstream KiroCrew ${VERSION} (${BASE})"
+
+      - name: Build and push
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: images/gateway/Containerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:kirocrew-${{ steps.upstream.outputs.version }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summarise
+        run: |
+          {
+            echo "### Gateway image"
+            echo
+            echo "Pegged to upstream KiroCrew \`${{ steps.upstream.outputs.version }}\`"
+            echo
+            echo "Base: \`${{ steps.upstream.outputs.base }}\`"
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo
+              echo "Verification build only — not published."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

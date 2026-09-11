@@ -47,7 +47,7 @@ const (
 	// not collide with the writable data volume.
 	configMountPath = "/etc/kiro-crew-config"
 
-	// defaultGatewayImage is our derived image (see images/gateway/Dockerfile):
+	// defaultGatewayImage is our derived image (see images/gateway/Containerfile):
 	// upstream's own gateway plus uv/uvx, node/npm/npx and the tailscale CLI.
 	// Upstream's stock image carries kiro-cli and the gateway but none of those
 	// runtimes, and the MCP ecosystem is distributed almost entirely as uvx and
