@@ -62,23 +62,34 @@ jobs:
 
       # The version the image is pegged to comes from the base image itself, not
       # from anything we maintain by hand, so the published tag says which
-      # upstream release it actually carries. Read from the config's env rather
-      # than a label: upstream sets KIROCREW_VERSION but no image.version label,
-      # which is why an earlier build published the useless tag "kirocrew-unknown".
+      # upstream release it actually carries.
+      #
+      # An earlier build published the useless tag "kirocrew-unknown" because
+      # `.Image.Config.Labels` resolves to nothing on a multi-arch ref, where
+      # `.Image` is a map keyed by platform rather than a single config. Reading
+      # the flattened JSON sidesteps that. The label is preferred over the
+      # KIROCREW_VERSION env because the config also embeds build history in
+      # which that env appears followed by other variables, so an env match can
+      # pick up trailing text and yield a tag containing a space.
       - name: Resolve the upstream KiroCrew version
         id: upstream
         run: |
           set -euo pipefail
           BASE="$(grep -oE '^FROM ghcr\.io/kirodotdev/kirocrew[^ ]+' images/gateway/Containerfile | sed 's/^FROM //')"
           echo "base=${BASE}" >> "$GITHUB_OUTPUT"
-          # Shell-only on purpose: the Env entries are quoted JSON strings, so a
-          # grep finds the value without needing a parser embedded in this YAML.
-          VERSION="$(docker buildx imagetools inspect "${BASE}" --format '{{json .Image}}' \
-            | tr ',' '\n' \
-            | grep -oE 'KIROCREW_VERSION=[^"]+' \
-            | head -1 | cut -d= -f2 || true)"
+          CFG="$(docker buildx imagetools inspect "${BASE}" --format '{{json .Image}}')"
+          VERSION="$(printf '%s' "$CFG" \
+            | grep -oE '"org\.opencontainers\.image\.version":"[^"]+"' \
+            | head -1 | cut -d'"' -f4 || true)"
           if [ -z "${VERSION}" ]; then
-            echo "::warning::Could not read KIROCREW_VERSION from ${BASE}; tagging by commit only"
+            VERSION="$(printf '%s' "$CFG" \
+              | grep -oE 'KIROCREW_VERSION=[^" ]+' | head -1 | cut -d= -f2 || true)"
+          fi
+          # A tag is immutable once pushed, so refuse anything that is not a clean
+          # version rather than publishing a malformed or misleading one.
+          if ! printf '%s' "${VERSION}" | grep -qE '^[0-9A-Za-z][0-9A-Za-z._+-]*$'; then
+            echo "::warning::Could not read a usable version from ${BASE} (got '${VERSION}'); tagging by commit only"
+            VERSION=""
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Pegged to upstream KiroCrew ${VERSION:-<unknown>} (${BASE})"
