@@ -57,6 +57,58 @@ Tailscale SSH is not enabled. The dashboard is the interface and `kubectl exec`
 covers administrative access, so an SSH server on every crew would be a second way
 into a pod holding someone's Kiro token without adding a capability anyone needs.
 
+## The gateway image
+
+`spec.gateway.image` defaults to `ghcr.io/lsdopen/kiro-crew-gateway`, built from
+[images/gateway/Containerfile](images/gateway/Containerfile). It is upstream's own
+`ghcr.io/kirodotdev/kirocrew` — which already carries `kiro-cli`, the agent
+runtime — plus three things a crew on a cluster turns out to need:
+
+| Added | Why |
+|-------|-----|
+| `uv`, `uvx` | Most MCP servers are distributed as `uvx` commands |
+| `node`, `npm`, `npx` | The rest are `npx` commands; also any JS/TS repo work |
+| `tailscale` (CLI only) | The gateway resolves it from a fixed allowlist of absolute paths and never consults `PATH`; without it, its own tailnet status and serve paths report "Tailscale is not installed here" |
+
+Upstream's image is deliberately minimal — `ca-certificates`, `curl`, `git`,
+`ripgrep`, `tini`, `unzip` and Python — so on it a crew's MCP servers simply fail
+to start, which makes `spec.mcpConfigRef` close to decorative. Set
+`spec.gateway.image` to the upstream image to run it unmodified instead.
+
+`tailscaled` is **not** added: KiroCrew's entrypoint owns PID 1, so this container
+cannot supervise a second daemon. The daemon stays in the sidecar.
+
+Each base is written `repo:tag@sha256:digest`. The digest is what builds, so a
+build is reproducible; the tag is what Dependabot follows. Every added binary is
+executed during the build (`uv --version`, `node --version`, `tailscale version`,
+…) so a changed upstream layout fails the build instead of shipping a subtly
+broken image.
+
+### It releases independently of the operator
+
+The gateway image tracks **upstream KiroCrew**, not this operator's version, so
+the two have separate cadences and an operator `v*` tag publishes no gateway
+image. Dependabot watches the bases daily and opens a PR when upstream's `stable`
+digest moves; merging that PR to `main` republishes the image via
+[.github/workflows/release-gateway.yml](.github/workflows/release-gateway.yml).
+So a new upstream KiroCrew release reaches crews without an operator release and
+without anyone watching for it. A weekly schedule catches a tag that moved
+without a PR, and a pull request touching the image builds it without publishing,
+so a broken `Containerfile` fails in review.
+
+Published tags:
+
+| Tag | Meaning |
+|-----|---------|
+| `latest` | What `spec.gateway.image` defaults to |
+| `kirocrew-<version>` | The upstream KiroCrew release it carries, read from the base image's own label rather than maintained by hand |
+| `sha-<commit>` | The exact commit of this repo that built it |
+
+The operator defaults to `latest` deliberately: pinning it to a fixed gateway
+version would force an operator release for every upstream bump, which is the
+coupling this split exists to avoid. Set `spec.gateway.image` to a
+`kirocrew-<version>` tag on an instance that needs a frozen runtime.
+
 ## Two one-time human approvals
 
 Provisioning a crew requires exactly two interactive steps, and neither can be
@@ -139,8 +191,9 @@ token carrying `read:packages` is needed first.
 
 ## Releasing
 
-Releases are tagged by hand — nothing tags on merge. Bump `version` and
-`appVersion` in `dist/chart/Chart.yaml` in the same change, then:
+Two independent streams. The **operator** (its image and the chart) is tagged by
+hand — nothing tags on merge. Bump `version` and `appVersion` in
+`dist/chart/Chart.yaml` in the same change, then:
 
 ```sh
 git tag -a v0.2.0 -m "..." && git push origin v0.2.0
@@ -148,6 +201,10 @@ git tag -a v0.2.0 -m "..." && git push origin v0.2.0
 
 The release workflow refuses a tag that disagrees with `Chart.yaml`, so the
 published chart version always matches the tag it was built from.
+
+The **gateway image** is not tagged at all — it republishes whenever
+`images/gateway/**` changes on `main`, which is normally a merged Dependabot base
+bump. See [The gateway image](#it-releases-independently-of-the-operator).
 
 ## Development
 

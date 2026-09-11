@@ -47,8 +47,21 @@ const (
 	// not collide with the writable data volume.
 	configMountPath = "/etc/kiro-crew-config"
 
+	// defaultGatewayImage is our derived image (see images/gateway/Containerfile):
+	// upstream's own gateway plus uv/uvx, node/npm/npx and the tailscale CLI.
+	// Upstream's stock image carries kiro-cli and the gateway but none of those
+	// runtimes, and the MCP ecosystem is distributed almost entirely as uvx and
+	// npx commands — so on the stock image a crew's MCP servers cannot start.
+	// Override spec.gateway.image to run upstream's image directly instead.
 	defaultGatewayImage   = "ghcr.io/lsdopen/kiro-crew-gateway:latest"
 	defaultTailscaleImage = "ghcr.io/tailscale/tailscale:stable"
+
+	// gatewayHealthPath is upstream's health endpoint, used by its own
+	// HEALTHCHECK. It is not /healthz.
+	gatewayHealthPath = "/api/health"
+
+	// The upstream image creates and runs as uid/gid 1000.
+	gatewayUIDValue int64 = 1000
 
 	// namePrefix keeps every generated object and tailnet hostname under one
 	// recognisable prefix.
@@ -293,6 +306,8 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 		sts.Labels = labels
 		replicas := int32(1)
 		runAsNonRoot := true
+		gatewayUID := gatewayUIDValue
+		gatewayGID := gatewayUIDValue
 		allowPrivilegeEscalation := false
 		readOnlyRootFS := false // the gateway writes scratch under KIROCREW_HOME
 
@@ -302,13 +317,25 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 
 		sts.Spec.Template.Labels = labels
 		sts.Spec.Template.Spec.ServiceAccountName = instanceName(crew)
+		// The upstream image runs as uid/gid 1000 and keeps every piece of state
+		// on the volume, so without fsGroup a freshly provisioned block volume
+		// comes up root-owned and the gateway cannot write its own memory or
+		// token vault.
 		sts.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
 			RunAsNonRoot: &runAsNonRoot,
+			RunAsUser:    &gatewayUID,
+			RunAsGroup:   &gatewayGID,
+			FSGroup:      &gatewayGID,
 		}
 
 		env := []corev1.EnvVar{
 			{Name: "KIROCREW_HOME", Value: dataMountPath},
 			{Name: "KIROCREW_PORT", Value: fmt.Sprintf("%d", gatewayPort)},
+			// The image defaults to 0.0.0.0. Containers in a pod share a network
+			// namespace, so the tailscale sidecar still reaches the gateway on
+			// loopback, and binding loopback-only means the deny-all
+			// NetworkPolicy is not the sole thing keeping the pod network out.
+			{Name: "KIROCREW_BIND", Value: "127.0.0.1"},
 			// Force the remote install shape. Left to its own detection the
 			// gateway sees a container and assumes a loopback OAuth callback can
 			// work, but the owner's browser is on their laptop, so that flow
@@ -346,32 +373,16 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 				ReadOnlyRootFilesystem:   &readOnlyRootFS,
 				Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 			},
-			// Publishing the dashboard on the tailnet takes two independent
-			// steps. Trusting the tailnet origin happens in-process from config;
-			// actually serving it does not, so invoke it here once the gateway is
-			// listening. --port is passed explicitly because `tailnet up` refuses
-			// to guess a port it has no evidence for. Idempotent, so it is safe
-			// on every restart.
-			Lifecycle: &corev1.Lifecycle{
-				PostStart: &corev1.LifecycleHandler{
-					Exec: &corev1.ExecAction{
-						Command: []string{
-							"/bin/sh", "-c",
-							fmt.Sprintf(
-								"for i in $(seq 1 60); do "+
-									"if nc -z 127.0.0.1 %d; then "+
-									"kirocrew tailnet up --port %d && exit 0; fi; "+
-									"sleep 2; done; exit 0",
-								gatewayPort, gatewayPort,
-							),
-						},
-					},
-				},
-			},
+			// No postStart hook publishes the dashboard. `kirocrew tailnet up`
+			// shells out to a tailscale CLI at a fixed absolute path and
+			// deliberately never consults PATH, and this image ships no such
+			// binary — so publishing is the sidecar's job via TS_SERVE_CONFIG
+			// below. All this container needs is to trust the tailnet origin,
+			// which it reads from config.
 			ReadinessProbe: &corev1.Probe{
 				ProbeHandler: corev1.ProbeHandler{
 					HTTPGet: &corev1.HTTPGetAction{
-						Path: "/healthz",
+						Path: gatewayHealthPath,
 						Port: intOrString(gatewayPort),
 						Host: "127.0.0.1",
 					},

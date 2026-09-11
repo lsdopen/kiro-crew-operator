@@ -72,8 +72,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Uses the repo's own target rather than a third-party action, which is
-      # the same path test-chart.yml already exercises on every push.
       - name: Install Helm
         run: make install-helm
 

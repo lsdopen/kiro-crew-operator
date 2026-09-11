@@ -1,0 +1,55 @@
+version: 2
+
+updates:
+  # The gateway image's bases, including upstream KiroCrew itself. This is what
+  # keeps the gateway pegged to upstream: Dependabot follows the tag in each
+  # `repo:tag@sha256:digest` line and opens a PR when that tag's digest moves.
+  # Merging it to main republishes the image (see release-gateway.yml), so a new
+  # upstream KiroCrew release reaches crews without anyone watching for it.
+  #
+  # Dependabot's docker ecosystem matches /dockerfile|containerfile/i, so the
+  # file being named Containerfile is fine — but it only sees a digest written
+  # literally in the FROM line, never one behind an ARG.
+  - package-ecosystem: docker
+    directory: /images/gateway
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "gateway"
+    labels:
+      - dependencies
+      - gateway-image
+
+  # Workflow action pins. Every `uses:` here is pinned to a commit SHA, which is
+  # correct for supply chain but goes stale silently without this.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
+      - github-actions
+
+  # The operator's own Go dependencies.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+    labels:
+      - dependencies
+      - go
+
+  # The operator image's base (the root Dockerfile).
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "operator-image"
+    labels:
+      - dependencies
