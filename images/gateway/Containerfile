@@ -22,7 +22,7 @@
 # image; failing the build is the cheaper outcome.
 
 # uv publishes its binaries at the image root (its own ENTRYPOINT is /uv).
-FROM ghcr.io/astral-sh/uv:latest@sha256:b485bd65cc2cf1c9a93b3554012c9c3778cf7b1b5fd3d3096ce9e1226c97e1e6 AS uv
+FROM ghcr.io/astral-sh/uv:latest@sha256:1946145b8706ad9e5c0e79a513f9e324b58d5e38126bb2c8b7dbfca61febeb45 AS uv
 
 # Tailscale's image is Alpine-based while ours is Debian, which is fine because
 # these are static Go binaries — the version check at the end of the build is
