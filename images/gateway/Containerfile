@@ -27,7 +27,7 @@ FROM ghcr.io/astral-sh/uv:latest@sha256:b485bd65cc2cf1c9a93b3554012c9c3778cf7b1b
 # Tailscale's image is Alpine-based while ours is Debian, which is fine because
 # these are static Go binaries — the version check at the end of the build is
 # what actually proves it rather than assuming.
-FROM ghcr.io/tailscale/tailscale:stable@sha256:8c42c4574ab066384fcb72f69e086a2ff1dd3652eb6f56856cee34bcf0d2f680 AS tailscale
+FROM ghcr.io/tailscale/tailscale:stable@sha256:2667499ed87ae29218f292556ba062918402dd5e92e93637af14867e4df12dd3 AS tailscale
 
 # trixie-slim matches the base image's own Debian release, so the runtime's
 # glibc is the one node was built against.
