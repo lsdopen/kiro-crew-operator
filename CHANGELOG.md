@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.0...v0.2.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* publish releases via workflow_call, not a token-created event ([28a95cd](https://github.com/lsdopen/kiro-crew-operator/commit/28a95cdd03069621103521ba37fc01b2a4604d3f))
+* publish releases via workflow_call, not a token-created event ([d160352](https://github.com/lsdopen/kiro-crew-operator/commit/d160352d34e9bab1b952cab3acf91d1f9d86aac0))
+
 ## [0.2.0](https://github.com/lsdopen/kiro-crew-operator/compare/v0.1.3...v0.2.0) (2026-09-11)
 
 
