@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.2](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.1...v0.2.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **chart:** name the operator Deployment kiro-crew-operator ([41485c6](https://github.com/lsdopen/kiro-crew-operator/commit/41485c61aa78fb5072d2147d7d6c1717e69df509))
+
+
+### Dependencies
+
+* bump Go modules and fix GO-2026-6505, GO-2026-6348 ([06d99ce](https://github.com/lsdopen/kiro-crew-operator/commit/06d99ceaec851903dfcee4d757de66fd913cbfd5))
+* pin gateway to kirocrew 0.7.2 and tailscale v1.102.5 ([8190e5d](https://github.com/lsdopen/kiro-crew-operator/commit/8190e5d4805ce6b5138f3794410283376d6557f4))
+
 ## [0.2.1](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.0...v0.2.1) (2026-09-11)
 
 
