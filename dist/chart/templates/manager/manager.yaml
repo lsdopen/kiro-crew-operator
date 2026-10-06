@@ -13,7 +13,7 @@ metadata:
     {{- toYaml . | nindent 4 }}
     {{- end }}
     {{- end }}
-  name: {{ include "kiro-crew-operator.resourceName" (dict "suffix" "controller-manager" "context" $) }}
+  name: {{ include "kiro-crew-operator.fullname" $ }}
   namespace: {{ .Release.Namespace }}
   {{- if .Values.manager.annotations }}
   annotations:
