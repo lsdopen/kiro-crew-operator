@@ -96,6 +96,10 @@ const (
 	// gateway's KIROCREW_HOME and the tailnet node identity both live on it.
 	dataVolumeName = "data"
 
+	// configVolumeName is the ConfigMap volume holding config.local.json and the
+	// serve config, mounted into the init container and the tailscale sidecar.
+	configVolumeName = "config"
+
 	// tailscaleContainerName is the sidecar's name, and also the subPath its
 	// state occupies on the data volume.
 	tailscaleContainerName = "tailscale"
@@ -489,7 +493,7 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 			},
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: dataVolumeName, MountPath: tailscaleStatePath, SubPath: tailscaleContainerName},
-				{Name: "config", MountPath: serveConfigMountPath, ReadOnly: true},
+				{Name: configVolumeName, MountPath: serveConfigMountPath, ReadOnly: true},
 				{Name: tailscaleSocketVolume, MountPath: tailscaleSocketDir},
 			},
 			Resources: corev1.ResourceRequirements{
@@ -530,7 +534,7 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 			},
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: dataVolumeName, MountPath: dataMountPath},
-				{Name: "config", MountPath: configMountPath, ReadOnly: true},
+				{Name: configVolumeName, MountPath: configMountPath, ReadOnly: true},
 			},
 		}
 		sts.Spec.Template.Spec.InitContainers = []corev1.Container{seedInit}
@@ -543,7 +547,7 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 			},
 			{
-				Name: "config",
+				Name: configVolumeName,
 				VolumeSource: corev1.VolumeSource{
 					ConfigMap: &corev1.ConfigMapVolumeSource{
 						LocalObjectReference: corev1.LocalObjectReference{
