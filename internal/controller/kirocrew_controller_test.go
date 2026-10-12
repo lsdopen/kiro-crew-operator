@@ -108,7 +108,8 @@ var _ = Describe("KiroCrew Controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name: name + "-config", Namespace: resourceNamespace,
 			}, &cm)).To(Succeed())
-			Expect(cm.Data["config.json"]).To(ContainSubstring("\"enabled\": true"))
+			Expect(cm.Data["config.local.json"]).To(ContainSubstring("\"enabled\": true"))
+			Expect(cm.Data["config.local.json"]).To(ContainSubstring("\"trust_identity\": true"))
 
 			By("reporting it is not ready while the node is unauthenticated")
 			var updated kirocrewv1alpha1.KiroCrew
