@@ -40,12 +40,37 @@ const (
 	// the owner authenticate interactively again.
 	tailscaleStatePath = "/var/lib/tailscale"
 
+	// tailscaleSocketPath is tailscaled's default LocalAPI socket. The image
+	// defaults it to /tmp, but the gateway's own tailscale CLI only looks at
+	// this default path, so both must agree here for `tailscale serve` to work.
+	tailscaleSocketDir  = "/var/run/tailscale"
+	tailscaleSocketPath = tailscaleSocketDir + "/tailscaled.sock"
+
+	// tailscaleSocketVolume is an emptyDir shared by the sidecar (which
+	// creates the LocalAPI socket) and the gateway (whose tailscale CLI reads
+	// it to resolve the tailnet name for its CSRF origin allowlist). Without
+	// a shared mount the gateway cannot reach the daemon and answers 403.
+	tailscaleSocketVolume = "tailscale-socket"
+
 	mcpConfigMountPath = "/etc/kiro-crew"
 
-	// configMountPath is where the gateway's config.json is mounted. It is a
-	// distinct directory from KIROCREW_HOME so a read-only ConfigMap mount does
-	// not collide with the writable data volume.
+	// configMountPath is where the config ConfigMap is mounted for the init
+	// container to read. The gateway itself does not read from here: its loader
+	// only reads config.local.json under KIROCREW_HOME, so the init container
+	// copies the ConfigMap into the data volume at that path.
 	configMountPath = "/etc/kiro-crew-config"
+
+	// localConfigFile is the filename the gateway's loader reads from
+	// KIROCREW_HOME. The ConfigMap is seeded here by the init container.
+	localConfigFile = "config.local.json"
+
+	// serveConfigFile is the ipn.ServeConfig the tailscale sidecar reads via
+	// TS_SERVE_CONFIG to publish the gateway on the tailnet over HTTPS.
+	serveConfigFile = "serve-config.json"
+
+	// serveConfigMountPath is where the ConfigMap serve config is mounted in
+	// the sidecar.
+	serveConfigMountPath = "/etc/tailscale"
 
 	// defaultGatewayImage is our derived image (see images/gateway/Containerfile):
 	// upstream's own gateway plus uv/uvx, node/npm/npx and the tailscale CLI.
@@ -84,6 +109,13 @@ const (
 // prints while waiting to be authenticated. The operator lifts it into status
 // because it cannot be delivered over the tailnet the node is trying to join.
 var tailnetLoginURLPattern = regexp.MustCompile(`https://login\.tailscale\.com/[^\s"']+`)
+
+// healthProbeCommand curls the gateway health endpoint on loopback. The
+// gateway binds 127.0.0.1 only, so an exec probe is the one that can reach it.
+var healthProbeCommand = []string{
+	"curl", "-fsS", "-m", "2",
+	fmt.Sprintf("http://127.0.0.1:%d%s", gatewayPort, gatewayHealthPath),
+}
 
 // KiroCrewReconciler reconciles a KiroCrew object.
 type KiroCrewReconciler struct {
@@ -200,8 +232,8 @@ func resolveSize(crew *kirocrewv1alpha1.KiroCrew) (corev1.ResourceRequirements, 
 // dashboard.tailscale.enabled is what makes the gateway derive and trust its own
 // tailnet origin at startup. Without it the dashboard answers 403 to a request
 // arriving on the MagicDNS name, so the desktop app could reach the pod and still
-// be refused. Config travels in a ConfigMap rather than the image so it can change
-// with a redeploy instead of a rebuild.
+// be refused. The ConfigMap is the source the init container copies to
+// KIROCREW_HOME/config.local.json, which is the only path the loader reads.
 func (r *KiroCrewReconciler) reconcileConfigMap(ctx context.Context, crew *kirocrewv1alpha1.KiroCrew) error {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -212,14 +244,32 @@ func (r *KiroCrewReconciler) reconcileConfigMap(ctx context.Context, crew *kiroc
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
 		cm.Labels = labelsFor(crew)
 		cm.Data = map[string]string{
-			"config.json": `{
+			// trust_identity + allowed_logins let the gateway log the owner in
+			// from their Tailscale identity (added to each request by serve), so
+			// no dashboard token is ever needed. The owner is the only allowed
+			// login; a verified peer whose login is not listed is denied.
+			localConfigFile: fmt.Sprintf(`{
   "dashboard": {
     "tailscale": {
-      "enabled": true
+      "enabled": true,
+      "trust_identity": true,
+      "allowed_logins": [%q]
     }
   }
 }
-`,
+`, crew.Spec.Owner),
+			// ${TS_CERT_DOMAIN} is expanded by containerboot to the node's
+			// MagicDNS name, so the handler fronts tailnet HTTPS :443 onto the
+			// gateway on loopback.
+			serveConfigFile: fmt.Sprintf(`{
+  "TCP": { "443": { "HTTPS": true } },
+  "Web": {
+    "${TS_CERT_DOMAIN}:443": {
+      "Handlers": { "/": { "Proxy": "http://127.0.0.1:%d/" } }
+    }
+  }
+}
+`, gatewayPort),
 		}
 		return controllerutil.SetControllerReference(crew, cm, r.Scheme)
 	})
@@ -347,7 +397,7 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 
 		gatewayMounts := []corev1.VolumeMount{
 			{Name: dataVolumeName, MountPath: dataMountPath},
-			{Name: "config", MountPath: configMountPath, ReadOnly: true},
+			{Name: tailscaleSocketVolume, MountPath: tailscaleSocketDir},
 		}
 		if crew.Spec.MCPConfigRef != "" {
 			gatewayMounts = append(gatewayMounts, corev1.VolumeMount{
@@ -379,16 +429,28 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 			// binary — so publishing is the sidecar's job via TS_SERVE_CONFIG
 			// below. All this container needs is to trust the tailnet origin,
 			// which it reads from config.
+			// The gateway binds loopback only (KIROCREW_BIND=127.0.0.1), so the
+			// pod network cannot reach it — by design. An HTTP probe cannot work:
+			// the kubelet dials the pod IP, not loopback, and gets refused. An
+			// exec probe curls loopback from inside the container, which is the
+			// only probe that reaches a loopback-only listener without reopening
+			// the pod network. The startup probe gives the gateway room to boot
+			// before readiness starts counting failures.
+			StartupProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					Exec: &corev1.ExecAction{Command: healthProbeCommand},
+				},
+				PeriodSeconds:    5,
+				TimeoutSeconds:   3,
+				FailureThreshold: 30,
+			},
 			ReadinessProbe: &corev1.Probe{
 				ProbeHandler: corev1.ProbeHandler{
-					HTTPGet: &corev1.HTTPGetAction{
-						Path: gatewayHealthPath,
-						Port: intOrString(gatewayPort),
-						Host: "127.0.0.1",
-					},
+					Exec: &corev1.ExecAction{Command: healthProbeCommand},
 				},
-				InitialDelaySeconds: 10,
-				PeriodSeconds:       15,
+				PeriodSeconds:    15,
+				TimeoutSeconds:   3,
+				FailureThreshold: 3,
 			},
 		}
 
@@ -401,14 +463,34 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 			{Name: "TS_HOSTNAME", Value: hostname},
 			{Name: "TS_STATE_DIR", Value: tailscaleStatePath},
 			{Name: "TS_USERSPACE", Value: "true"},
+			{Name: "TS_SOCKET", Value: tailscaleSocketPath},
+			{Name: "TS_SERVE_CONFIG", Value: serveConfigMountPath + "/" + serveConfigFile},
+			// Store state on the data-volume subPath, not a kube Secret. The
+			// default kube-secret mode needs a pre-created Secret plus RBAC the
+			// operator does not grant; file state on persistent storage needs
+			// neither and survives restarts the same way.
+			{Name: "TS_KUBE_SECRET", Value: ""},
 		}
 
+		initRoot := int64(0)
+		initRunAsNonRoot := false
 		tailscale := corev1.Container{
 			Name:  tailscaleContainerName,
 			Image: tailscaleImage,
 			Env:   tailscaleEnv,
+			// Runs as root so containerboot can create /var/run/tailscale and put
+			// the LocalAPI socket at its default path. The gateway shells out to
+			// its own tailscale CLI, which only looks there, so a non-default
+			// socket would leave the gateway unable to drive `tailscale serve`.
+			SecurityContext: &corev1.SecurityContext{
+				RunAsNonRoot: &initRunAsNonRoot,
+				RunAsUser:    &initRoot,
+				RunAsGroup:   &initRoot,
+			},
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: dataVolumeName, MountPath: tailscaleStatePath, SubPath: tailscaleContainerName},
+				{Name: "config", MountPath: serveConfigMountPath, ReadOnly: true},
+				{Name: tailscaleSocketVolume, MountPath: tailscaleSocketDir},
 			},
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
@@ -421,9 +503,45 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 			},
 		}
 
+		// The gateway runs as uid 1000 and, at startup, chmods KIROCREW_HOME to
+		// 0700 — which only its owner may do. A freshly provisioned EBS volume
+		// comes up owned by root, and fsGroup only fixes group ownership, not
+		// the owner, so that chmod fails with EPERM and the gateway crashes.
+		// This init container runs as root to chown the volume to 1000, then
+		// seeds config.local.json where the loader reads it (the gateway never
+		// reads the ConfigMap mount directly).
+		seedInit := corev1.Container{
+			Name:    "init",
+			Image:   gatewayImage,
+			Command: []string{"sh", "-c"},
+			Args: []string{fmt.Sprintf(
+				"chown %d:%d %s && mkdir -p %s/%s && chown %d:%d %s/%s && cp %s/%s %s/%s && chown %d:%d %s/%s",
+				gatewayUID, gatewayGID, dataMountPath,
+				dataMountPath, tailscaleContainerName,
+				gatewayUID, gatewayGID, dataMountPath, tailscaleContainerName,
+				configMountPath, localConfigFile, dataMountPath, localConfigFile,
+				gatewayUID, gatewayGID, dataMountPath, localConfigFile,
+			)},
+			SecurityContext: &corev1.SecurityContext{
+				RunAsNonRoot:             &initRunAsNonRoot,
+				RunAsUser:                &initRoot,
+				RunAsGroup:               &initRoot,
+				AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+			},
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: dataVolumeName, MountPath: dataMountPath},
+				{Name: "config", MountPath: configMountPath, ReadOnly: true},
+			},
+		}
+		sts.Spec.Template.Spec.InitContainers = []corev1.Container{seedInit}
+
 		sts.Spec.Template.Spec.Containers = []corev1.Container{gateway, tailscale}
 
 		volumes := []corev1.Volume{
+			{
+				Name:         tailscaleSocketVolume,
+				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+			},
 			{
 				Name: "config",
 				VolumeSource: corev1.VolumeSource{
