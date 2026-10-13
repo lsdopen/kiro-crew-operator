@@ -256,7 +256,7 @@ console:
 
   ## Exposure is the operator's choice: set class and annotations for a private or
   ## public ingress. SSO is the authentication step either way.
-  ## Rate limit /auth with ingress annotations (e.g. nginx limit-rps).
+  ## Rate-limit /auth at your ingress or gateway; the console does not do per-IP limiting.
   ingress:
     enabled: false
     className: ""
@@ -265,22 +265,6 @@ console:
     tls:
       enabled: true
       secretName: ""
-
-  ## Restrict the console pod's traffic. Off by default: it needs a CNI that
-  ## enforces NetworkPolicy, and the right ingress namespace.
-  networkPolicy:
-    enabled: false
-    ## NetworkPolicy "from" peers allowed to reach the console. Match your ingress:
-    ## behind an ALB in ip mode, use an ipBlock for the load balancer subnets.
-    ingressFrom:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: ingress-nginx
-    ## Namespace of cluster DNS.
-    dnsNamespace: kube-system
-    ## CIDRs of the API server endpoints (kubectl get endpoints kubernetes). Empty
-    ## allows ports 443 and 6443 to any address.
-    apiServerCIDRs: []
 
   resources:
     requests:
