@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -10,6 +11,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -120,6 +122,45 @@ var _ = Describe("KiroCrew Controller", func() {
 			// No dashboard URL until the node is actually on the tailnet, or the
 			// owner would be sent to a name that does not resolve.
 			Expect(updated.Status.DashboardURL).To(BeEmpty())
+		})
+
+		It("should stop outside the schedule, keep the StatefulSet, and requeue at the boundary", func() {
+			var crew kirocrewv1alpha1.KiroCrew
+			Expect(k8sClient.Get(ctx, typeNamespacedName, &crew)).To(Succeed())
+			crew.Spec.Schedule = &kirocrewv1alpha1.ScheduleSpec{
+				Up: weekdayUp, Down: weekdayDown, Timezone: tzUTC,
+			}
+			Expect(k8sClient.Update(ctx, &crew)).To(Succeed())
+
+			now := time.Date(2026, 10, 12, 19, 0, 0, 0, time.UTC) // Monday evening
+			r := &KiroCrewReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Now:    func() time.Time { return now },
+			}
+			res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.RequeueAfter).To(Equal(13 * time.Hour)) // until 08:00 Tuesday
+
+			var sts appsv1.StatefulSet
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: namePrefix + "-" + resourceName, Namespace: resourceNamespace,
+			}, &sts)).To(Succeed())
+			Expect(*sts.Spec.Replicas).To(BeZero())
+
+			var updated kirocrewv1alpha1.KiroCrew
+			Expect(k8sClient.Get(ctx, typeNamespacedName, &updated)).To(Succeed())
+			Expect(updated.Status.Suspended).To(BeTrue())
+			Expect(updated.Status.NextTransition).NotTo(BeNil())
+			ready := findCondition(updated.Status.Conditions, kirocrewv1alpha1.ConditionReady)
+			Expect(ready.Reason).To(Equal(kirocrewv1alpha1.ReasonOutsideSchedule))
+
+			By("starting again once the window opens")
+			now = time.Date(2026, 10, 13, 8, 0, 0, 0, time.UTC)
+			_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(&sts), &sts)).To(Succeed())
+			Expect(*sts.Spec.Replicas).To(Equal(int32(1)))
 		})
 
 		It("should be idempotent across repeated reconciles", func() {

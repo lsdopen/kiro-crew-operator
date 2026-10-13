@@ -115,6 +115,23 @@ type AWSSpec struct {
 	RoleARN string `json:"roleARN,omitempty"`
 }
 
+// ScheduleSpec is a daily start/stop window. The most recent of the Up and Down
+// fire times decides whether the crew should be running.
+type ScheduleSpec struct {
+	// Up is a 5-field cron expression for when the crew starts, e.g. "0 8 * * 1-5".
+	// +kubebuilder:validation:MinLength=9
+	Up string `json:"up"`
+
+	// Down is a 5-field cron expression for when the crew stops, e.g. "0 18 * * 1-5".
+	// +kubebuilder:validation:MinLength=9
+	Down string `json:"down"`
+
+	// Timezone is the IANA zone the cron expressions are evaluated in.
+	// +optional
+	// +kubebuilder:default=UTC
+	Timezone string `json:"timezone,omitempty"`
+}
+
 // KiroCrewSpec defines the desired state of a Kiro Crew instance.
 type KiroCrewSpec struct {
 	// Owner is the tailnet identity that owns this crew, e.g. "someone@example.com".
@@ -153,6 +170,15 @@ type KiroCrewSpec struct {
 	// endpoints can change with a helm upgrade instead of an image rebuild.
 	// +optional
 	MCPConfigRef string `json:"mcpConfigRef,omitempty"`
+
+	// Suspend stops the crew (StatefulSet replicas 0) and overrides schedule.
+	// The PVC is kept, so identity, tailnet state and the Kiro token survive.
+	// +optional
+	Suspend bool `json:"suspend,omitempty"`
+
+	// Schedule starts and stops the crew on a time window.
+	// +optional
+	Schedule *ScheduleSpec `json:"schedule,omitempty"`
 }
 
 // Condition types reported on a KiroCrew.
@@ -167,6 +193,17 @@ const (
 	// the tailnet join this needs a one-time human approval — the device-code
 	// flow, approved from the owner's own browser — so it cannot be provisioned.
 	ConditionKiroAuthenticated = "KiroAuthenticated"
+	// ConditionScheduled reports whether spec.schedule is valid and in effect.
+	// It is absent when no schedule is set. A deliberately stopped crew reports
+	// Ready=False with reason Suspended or OutsideSchedule, which is not an error.
+	ConditionScheduled = "Scheduled"
+)
+
+// Reasons used on Ready and Scheduled when the crew is intentionally stopped.
+const (
+	ReasonSuspended       = "Suspended"
+	ReasonOutsideSchedule = "OutsideSchedule"
+	ReasonInvalidSchedule = "InvalidSchedule"
 )
 
 // KiroCrewStatus reports the observed state of a Kiro Crew instance.
@@ -191,6 +228,15 @@ type KiroCrewStatus struct {
 	// +optional
 	DashboardURL string `json:"dashboardURL,omitempty"`
 
+	// Suspended is true while the crew is intentionally stopped, by spec.suspend
+	// or by being outside spec.schedule.
+	// +optional
+	Suspended bool `json:"suspended,omitempty"`
+
+	// NextTransition is when spec.schedule next starts or stops the crew.
+	// +optional
+	NextTransition *metav1.Time `json:"nextTransition,omitempty"`
+
 	// ObservedGeneration is the .metadata.generation this status reflects.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -202,6 +248,7 @@ type KiroCrewStatus struct {
 // +kubebuilder:printcolumn:name="Owner",type=string,JSONPath=".spec.owner"
 // +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".spec.size"
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
+// +kubebuilder:printcolumn:name="Suspended",type=boolean,JSONPath=".status.suspended"
 // +kubebuilder:printcolumn:name="Dashboard",type=string,JSONPath=".status.dashboardURL"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 

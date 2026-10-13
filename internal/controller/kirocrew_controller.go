@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -135,6 +136,16 @@ type KiroCrewReconciler struct {
 	// instance shares one tailnet, and it is what lets the operator publish the
 	// HTTPS address the desktop app connects to.
 	TailnetDomain string
+
+	// Now is the clock; nil means time.Now. Injected so schedule tests are deterministic.
+	Now func() time.Time
+}
+
+func (r *KiroCrewReconciler) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
 }
 
 // +kubebuilder:rbac:groups=kirocrew.lsdopen.io,resources=kirocrews,verbs=get;list;watch;create;update;patch;delete
@@ -177,11 +188,13 @@ func (r *KiroCrewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err := r.reconcileNetworkPolicy(ctx, &crew); err != nil {
 		return ctrl.Result{}, fmt.Errorf("reconciling NetworkPolicy: %w", err)
 	}
-	if err := r.reconcileStatefulSet(ctx, &crew); err != nil {
+	now := r.now()
+	desired := computeDesired(&crew.Spec, now)
+	if err := r.reconcileStatefulSet(ctx, &crew, desired.Replicas); err != nil {
 		return ctrl.Result{}, fmt.Errorf("reconciling StatefulSet: %w", err)
 	}
 
-	if err := r.reconcileStatus(ctx, &crew); err != nil {
+	if err := r.reconcileStatus(ctx, &crew, desired); err != nil {
 		return ctrl.Result{}, fmt.Errorf("reconciling status: %w", err)
 	}
 
@@ -189,10 +202,17 @@ func (r *KiroCrewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// While the node is still waiting for its owner's one-time authentication the
 	// login URL only exists in the sidecar's output, so poll until it is joined.
+	var requeue time.Duration
 	if crew.Status.TailnetLoginURL != "" {
-		return ctrl.Result{RequeueAfter: tailnetPollInterval}, nil
+		requeue = tailnetPollInterval
 	}
-	return ctrl.Result{}, nil
+	// Wake at the next schedule boundary so the flip happens on time.
+	if desired.Next != nil {
+		if d := max(desired.Next.Sub(now), time.Second); requeue == 0 || d < requeue {
+			requeue = d
+		}
+	}
+	return ctrl.Result{RequeueAfter: requeue}, nil
 }
 
 func instanceName(crew *kirocrewv1alpha1.KiroCrew) string {
@@ -332,7 +352,7 @@ func (r *KiroCrewReconciler) reconcileNetworkPolicy(ctx context.Context, crew *k
 // A StatefulSet rather than a Deployment: the instance is a single stateful
 // replica bound to one PVC, and volumeClaimTemplates give a stable claim without
 // the operator managing PVC lifecycle by hand.
-func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kirocrewv1alpha1.KiroCrew) error {
+func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kirocrewv1alpha1.KiroCrew, replicas int32) error {
 	resources, storage := resolveSize(crew)
 	labels := labelsFor(crew)
 
@@ -358,7 +378,6 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, sts, func() error {
 		sts.Labels = labels
-		replicas := int32(1)
 		runAsNonRoot := true
 		gatewayUID := gatewayUIDValue
 		gatewayGID := gatewayUIDValue
@@ -602,20 +621,29 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 
 // reconcileStatus reports readiness, the tailnet dashboard address, and — while
 // the node is still unauthenticated — the login URL its owner must open.
-func (r *KiroCrewReconciler) reconcileStatus(ctx context.Context, crew *kirocrewv1alpha1.KiroCrew) error {
+func (r *KiroCrewReconciler) reconcileStatus(ctx context.Context, crew *kirocrewv1alpha1.KiroCrew, desired desiredState) error {
 	var sts appsv1.StatefulSet
 	err := r.Get(ctx, types.NamespacedName{Name: instanceName(crew), Namespace: crew.Namespace}, &sts)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
-	podReady := err == nil && sts.Status.ReadyReplicas > 0
+	stopped := desired.Replicas == 0
+	podReady := !stopped && err == nil && sts.Status.ReadyReplicas > 0
 
-	loginURL := r.tailnetLoginURL(ctx, crew)
+	loginURL := ""
+	if !stopped {
+		loginURL = r.tailnetLoginURL(ctx, crew)
+	}
 	joined := loginURL == "" && podReady
 
 	patched := crew.DeepCopy()
 	patched.Status.ObservedGeneration = crew.Generation
 	patched.Status.TailnetLoginURL = loginURL
+	patched.Status.Suspended = stopped
+	patched.Status.NextTransition = nil
+	if desired.Next != nil {
+		patched.Status.NextTransition = &metav1.Time{Time: *desired.Next}
+	}
 
 	// Only advertise a dashboard address once the node is actually on the tailnet;
 	// publishing a MagicDNS name that does not resolve yet would just send the
@@ -645,6 +673,10 @@ func (r *KiroCrewReconciler) reconcileStatus(ctx context.Context, crew *kirocrew
 		tailnetCondition.Reason = "Joined"
 		tailnetCondition.Message = "Node is on the tailnet"
 	}
+	if stopped {
+		tailnetCondition.Reason = "Stopped"
+		tailnetCondition.Message = "Crew is intentionally stopped"
+	}
 	upsertCondition(&patched.Status.Conditions, tailnetCondition)
 
 	readyCondition := metav1.Condition{
@@ -655,6 +687,9 @@ func (r *KiroCrewReconciler) reconcileStatus(ctx context.Context, crew *kirocrew
 		ObservedGeneration: crew.Generation,
 	}
 	switch {
+	case stopped:
+		readyCondition.Reason = desired.Reason
+		readyCondition.Message = "Crew is intentionally stopped; the PVC is kept"
 	case podReady && joined:
 		readyCondition.Status = metav1.ConditionTrue
 		readyCondition.Reason = "Serving"
@@ -664,6 +699,25 @@ func (r *KiroCrewReconciler) reconcileStatus(ctx context.Context, crew *kirocrew
 		readyCondition.Message = "Gateway is running but the node is not yet authenticated"
 	}
 	upsertCondition(&patched.Status.Conditions, readyCondition)
+
+	scheduled := metav1.Condition{
+		Type:               kirocrewv1alpha1.ConditionScheduled,
+		Status:             metav1.ConditionTrue,
+		Reason:             "Valid",
+		Message:            "Schedule is in effect",
+		ObservedGeneration: crew.Generation,
+	}
+	switch {
+	case desired.ScheduleErr != nil:
+		scheduled.Status = metav1.ConditionFalse
+		scheduled.Reason = kirocrewv1alpha1.ReasonInvalidSchedule
+		scheduled.Message = desired.ScheduleErr.Error()
+		upsertCondition(&patched.Status.Conditions, scheduled)
+	case crew.Spec.Schedule != nil:
+		upsertCondition(&patched.Status.Conditions, scheduled)
+	default:
+		meta.RemoveStatusCondition(&patched.Status.Conditions, kirocrewv1alpha1.ConditionScheduled)
+	}
 
 	return r.Status().Patch(ctx, patched, client.MergeFrom(crew))
 }

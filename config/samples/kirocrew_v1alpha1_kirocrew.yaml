@@ -29,3 +29,13 @@ spec:
 
   # Optional ConfigMap holding mcp-servers.json.
   mcpConfigRef: ""
+
+  # Stop the crew on demand: replicas 0, PVC kept, so resume is instant.
+  suspend: false
+
+  # Or run it on a time window (5-field cron, evaluated in timezone). The most
+  # recent of up/down decides on or off. suspend: true overrides this.
+  schedule:
+    up: "0 8 * * 1-5"
+    down: "0 18 * * 1-5"
+    timezone: Africa/Johannesburg

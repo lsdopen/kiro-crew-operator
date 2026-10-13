@@ -26,6 +26,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
+    - jsonPath: .status.suspended
+      name: Suspended
+      type: boolean
     - jsonPath: .status.dashboardURL
       name: Dashboard
       type: string
@@ -153,6 +156,28 @@ spec:
                   nobody else.
                 minLength: 3
                 type: string
+              schedule:
+                description: Schedule starts and stops the crew on a time window.
+                properties:
+                  down:
+                    description: Down is a 5-field cron expression for when the crew
+                      stops, e.g. "0 18 * * 1-5".
+                    minLength: 9
+                    type: string
+                  timezone:
+                    default: UTC
+                    description: Timezone is the IANA zone the cron expressions are
+                      evaluated in.
+                    type: string
+                  up:
+                    description: Up is a 5-field cron expression for when the crew
+                      starts, e.g. "0 8 * * 1-5".
+                    minLength: 9
+                    type: string
+                required:
+                - down
+                - up
+                type: object
               size:
                 default: light
                 description: Size is the resource tier for this instance.
@@ -179,6 +204,11 @@ spec:
                       block storage (e.g. gp3), never a network filesystem.
                     type: string
                 type: object
+              suspend:
+                description: |-
+                  Suspend stops the crew (StatefulSet replicas 0) and overrides schedule.
+                  The PVC is kept, so identity, tailnet state and the Kiro token survive.
+                type: boolean
               tailscale:
                 description: Tailscale configures how the instance joins the tailnet.
                 properties:
@@ -264,11 +294,21 @@ spec:
                   tailscale serve. This is what the Kiro Crew desktop app connects to via
                   New Connection Window; the app requires https for a non-loopback host.
                 type: string
+              nextTransition:
+                description: NextTransition is when spec.schedule next starts or stops
+                  the crew.
+                format: date-time
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the .metadata.generation this status
                   reflects.
                 format: int64
                 type: integer
+              suspended:
+                description: |-
+                  Suspended is true while the crew is intentionally stopped, by spec.suspend
+                  or by being outside spec.schedule.
+                type: boolean
               tailnetLoginURL:
                 description: |-
                   TailnetLoginURL is the URL the owner opens to authenticate this node, once.
