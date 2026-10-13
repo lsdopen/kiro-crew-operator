@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.9](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.8...v0.2.9) (2026-10-13)
+
+
+### Features
+
+* console phase 3e (edit a running crew) ([#69](https://github.com/lsdopen/kiro-crew-operator/issues/69)) ([3b917ae](https://github.com/lsdopen/kiro-crew-operator/commit/3b917ae753d209dab32e707b813ca8d312c484bf))
+
 ## [0.2.8](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.7...v0.2.8) (2026-10-13)
 
 
