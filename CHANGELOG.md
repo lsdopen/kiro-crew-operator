@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.4...v0.2.5) (2026-10-13)
+
+
+### Features
+
+* add KiroCrewAccount and KiroCrewRequest CRDs ([#52](https://github.com/lsdopen/kiro-crew-operator/issues/52)) ([fb04597](https://github.com/lsdopen/kiro-crew-operator/commit/fb04597f350aa4b206a7ed49b9d3f20834baa140))
+
 ## [0.2.4](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.3...v0.2.4) (2026-10-13)
 
 
