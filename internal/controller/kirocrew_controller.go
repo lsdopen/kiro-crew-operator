@@ -150,6 +150,7 @@ func (r *KiroCrewReconciler) now() time.Time {
 
 // +kubebuilder:rbac:groups=kirocrew.lsdopen.io,resources=kirocrews,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kirocrew.lsdopen.io,resources=kirocrews/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=kirocrew.lsdopen.io,resources=kirocrews/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch

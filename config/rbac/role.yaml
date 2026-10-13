@@ -75,6 +75,7 @@ rules:
   - kirocrew.lsdopen.io
   resources:
   - kirocrewrequests/finalizers
+  - kirocrews/finalizers
   verbs:
   - update
 - apiGroups:
