@@ -10,7 +10,7 @@ All rulings are in. Everything else in this document is decided.
 
 | # | Question | Ruling | Status |
 |---|---|---|---|
-| 1 | How does "Start" work outside a crew's schedule? | "Start" from the UI runs the crew until its next scheduled shutdown. Add `KiroCrewSpec.runUntil *metav1.Time` = the next schedule Down; `computeDesired` (`internal/controller/schedule.go`) treats `now < runUntil` as up. With no schedule a crew always runs, so Start just clears `suspend`. "Stop" sets `suspend=true`. | Accepted |
+| 1 | How does "Start" work outside a crew's schedule? | Latest event wins. Add one event field, `KiroCrewSpec.startedAt *metav1.Time`, set by the console on Start. `computeDesired` / `inUpWindow` (`internal/controller/schedule.go`) treat it as an Up event: desired is up when the most recent of {last Up, last Down, `startedAt`} is an Up or `startedAt`, so the next scheduled Down stops the crew with no deadline field. The requeue includes the next Down after `startedAt`. Start also clears `suspend`; "Stop" sets `suspend=true`, which still forces stop. With no schedule a crew always runs, so `startedAt` is irrelevant. | Changed |
 | 2 | Sign-in brokering by `pods/exec`? | Yes. The console execs `kirocrew token`, limited to that one command (see [Narrowing (a)](#narrowing-a)). The upstream gateway identity bootstrap (option b) is pursued in parallel to remove the exec. | Accepted |
 | 3 | What happens on a first login from an allowed domain with no `KiroCrewAccount`? | Self sign-up is allowed. The console creates a `KiroCrewAccount` with role `user` and no manager. Until an admin sets a manager, only admins can approve that user's requests. `auth.allowedDomains` is now the only boundary on who gets an account (see the [threat model](#threat-model)). Admins can still edit roles and managers. | Changed |
 | 4 | Who may write `spec.decision` outside the console? | No ValidatingAdmissionPolicy and no break-glass group for now. Cluster admins can approve through the Kubernetes API. Residual risk: anyone with update or patch on `kirocrewrequests` can forge `decision.by`, so chart RBAC grants that only to the console ServiceAccount, and the controller's `canDecide` check stays defence in depth. Future option: a ValidatingAdmissionPolicy that allows `spec.decision` changes only from the console ServiceAccount plus a configurable break-glass group. | Deferred |
@@ -42,7 +42,7 @@ browser ──https──> Ingress, private or public (class, TLS, annotations: 
                      ▼
             kiro-crew-console (Deployment, 2 replicas, no sidecar)
               │ informers: KiroCrewAccount, KiroCrewRequest, KiroCrew, KiroCrewConfig
-              │ writes: requests (create, decision), crews (suspend/runUntil), accounts, config
+              │ writes: requests (create, decision), crews (suspend/startedAt), accounts, config
               │ exec: kirocrew token  (3c only)
               ▼
             kube-apiserver ──> operator reconciles as today
@@ -81,7 +81,7 @@ approve" and the request waits for an admin. Admins can edit roles and managers.
 | View own crew + request | ✓ | ✓ | ✓ | `crew.spec.owner == me` |
 | Create request | self | self | self | `requester := me` (never on someone else's behalf, Decision 6), no open request, no crew (`crewName(me)` free) |
 | Approve / deny | – | reports | all | same rule as `canDecide`; `decision.by := me`. A user with no manager has admins as the only approvers. |
-| Start / stop crew | own | own + reports | all | owner, or owner's `account.manager == me`, or admin. Start sets `suspend=false` and `runUntil`; Stop sets `suspend=true` (Decision 1). |
+| Start / stop crew | own | own + reports | all | owner, or owner's `account.manager == me`, or admin. Start sets `suspend=false` and `startedAt=now`; Stop sets `suspend=true` (Decision 1). |
 | Open dashboard (sign-in) | own | own | own | `crew.spec.owner == me` **only**. Managers and admins cannot broker into someone else's crew. |
 | See `status.tailnetLoginURL` | own | own | own | as above. It is a one-time node-auth URL. |
 | Accounts CRUD (roles, managers) | – | – | ✓ | cannot delete self or demote the last admin |
@@ -105,7 +105,7 @@ MUST hold only crew pods, because `pods/exec` below is namespace-wide.
 | ClusterRole | `kirocrewconfigs` | get, list, watch | 3a |
 | ClusterRole | `kirocrewconfigs` (resourceNames: `default`) | update, patch | 3d |
 | Role (crewNamespace) | `kirocrews` | get, list, watch | 3a |
-| Role (crewNamespace) | `kirocrews` | patch (only `suspend`/`runUntil`; code-enforced) | 3c |
+| Role (crewNamespace) | `kirocrews` | patch (only `suspend`/`startedAt`; code-enforced) | 3c |
 | Role (crewNamespace) | `kirocrewrequests` | get, list, watch | 3a |
 | Role (crewNamespace) | `kirocrewrequests` | create, patch | 3b |
 | Role (crewNamespace) | `pods` | get | 3c |
@@ -341,5 +341,5 @@ the authentication step regardless.
 |---|---|---|---|
 | **3a** login + read-only | OIDC login, sessions, CSRF scaffold, account resolution with first-login sign-up (role `user`, no manager), read-only views of own crew / requests (user), reports' (manager), all (admin); crew card with `dashboardURL` link and owner-only `tailnetLoginURL`; image, chart, ingress, release step; `KiroCrewConfig` CRD (read-only) | accounts create + read, configs/crews/requests read | envtest + httptest: empty-domain refusal, wrong `hd`, missing `email_verified`, first login creates a `user` account with no manager, role views |
 | **3b** requests + approvals | Request form (`allowedSizes`, defaults), approve/deny with `decision.by` from session (no admission policy, Decision 4); request controller honours `allowedSizes` | requests create, patch | posted `by=`/`requester=` ignored; non-manager approval → 403; a no-manager user's request is approvable only by an admin |
-| **3c** start/stop + sign-in | `runUntil` field + `computeDesired` change (Decision 1); start/stop; broker with exec VAP; re-verify gateway facts on the pinned image | crews patch, pods get, pods/exec | the token never appears in logs (captured logger); the VAP denies `sh`; non-owner `/open` → 403; a redirect host outside `tailnet.domain` → refused |
+| **3c** start/stop + sign-in | `startedAt` field + `computeDesired`/`inUpWindow` change: latest of last Up, last Down, `startedAt` wins, requeue includes next Down after `startedAt` (Decision 1); start/stop; broker with exec VAP; re-verify gateway facts on the pinned image | crews patch, pods get, pods/exec | the token never appears in logs (captured logger); the VAP denies `sh`; non-owner `/open` → 403; a redirect host outside `tailnet.domain` → refused |
 | **3d** admin config | Accounts CRUD (last-admin guard), `KiroCrewConfig` editor; crew controller reads images and MCP ref from config | accounts write, config `default` write | demote-last-admin refused; config change rolls gateway image on the next reconcile |
