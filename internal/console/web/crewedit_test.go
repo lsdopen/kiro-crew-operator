@@ -22,6 +22,7 @@ const (
 	keyReason    = "reason"
 	keyRequester = "requester"
 	crewAliceKey = "alice"
+	hdrHX        = "HX-Request"
 )
 
 func editPeople(extra ...client.Object) []client.Object {
@@ -282,5 +283,57 @@ func TestConfigEditorKeepsTheMCPAllowlist(t *testing.T) {
 	form.Set("mcp_configs", "Not_A_Name")
 	if w := e.post(root, pathConfig, form); w.Code != http.StatusBadRequest {
 		t.Fatalf("bad name status = %d", w.Code)
+	}
+}
+
+func TestResizeSelectKeepsCurrentSize(t *testing.T) {
+	all := []v1alpha1.Size{v1alpha1.SizeMini, v1alpha1.SizeLight, v1alpha1.SizeDevelopment, v1alpha1.SizePower}
+	const mini = "mini — 0.5 CPU · 8Gi RAM · 20Gi disk"
+	tests := []struct {
+		name    string
+		allowed []v1alpha1.Size
+		cur     string
+		absent  []string
+	}{
+		{"current size allowed", all, `<option value="mini" selected>` + mini + `</option>`, nil},
+		{"current size not allowed", []v1alpha1.Size{v1alpha1.SizeLight, v1alpha1.SizePower}, `<option value="mini" selected disabled>` + mini + `</option>`, []string{`value="development"`}},
+	}
+	hx := []string{hdrHX, htmxOn}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			crew := aliceCrew()
+			crew.Spec.Size = v1alpha1.SizeMini
+			cfg := configObj(v1alpha1.KiroCrewConfigSpec{AllowedSizes: tt.allowed, DefaultSize: v1alpha1.SizeLight})
+			e := newEnv(t, []string{testDomain}, append(people(acct(mgr2, v1alpha1.RoleManager, "")), crew, cfg)...)
+			// The page and every htmx partial that re-renders the crew row.
+			bodies := map[string]string{
+				"page":     e.get(alice, crewsPath).Body.String(),
+				"start":    e.post(alice, "/crews/alice/start", url.Values{}, hx...).Body.String(),
+				"stop":     e.post(alice, "/crews/alice/stop", url.Values{}, hx...).Body.String(),
+				"schedule": e.post(alice, pathSchedule, scheduleForm(), hx...).Body.String(),
+			}
+			for from, body := range bodies {
+				if !strings.Contains(body, `<select name="size" autocomplete="off">`) || !strings.Contains(body, tt.cur) {
+					t.Fatalf("%s: missing %q in %s", from, tt.cur, body)
+				}
+				for _, no := range tt.absent {
+					if strings.Contains(body, no) {
+						t.Fatalf("%s: unexpected %q", from, no)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSizePickersShowSpecs(t *testing.T) {
+	e := newEnv(t, []string{testDomain}, editPeople()...)
+	for _, path := range []string{crewsPath, "/requests"} {
+		if body := e.get(alice, path).Body.String(); !strings.Contains(body, "light — 1 CPU · 16Gi RAM · 40Gi disk") {
+			t.Fatalf("%s lacks size specs: %s", path, body)
+		}
+	}
+	if body := e.get(root, pathConfig).Body.String(); !strings.Contains(body, "power — 4 CPU · 64Gi RAM · 80Gi disk") {
+		t.Fatalf("config lacks size specs: %s", body)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1alpha1 "github.com/lsdopen/kiro-crew-operator/api/v1alpha1"
@@ -29,7 +30,7 @@ type Page struct {
 	// Notice is a one-line result of the last action.
 	Notice string
 	// Sizes are the choices on the request form and DefaultSize the preselected one.
-	Sizes       []string
+	Sizes       []SizeOption
 	DefaultSize string
 	// Config feeds the admin config editor.
 	Config ConfigForm
@@ -87,7 +88,15 @@ type ConfigForm struct {
 // SizeChoice is one tier and whether the config allows it.
 type SizeChoice struct {
 	Name    string
+	Spec    string
 	Allowed bool
+}
+
+// SizeOption is one size picker entry; Label carries the tier's specs.
+type SizeOption struct {
+	Name, Label string
+	// Disabled marks a current size the config no longer allows.
+	Disabled bool
 }
 
 // AccountRow is one account, shown to admins.
@@ -116,9 +125,9 @@ func newPage(v *authz.View, csrf, active string) Page {
 	}
 	for _, name := range sizeNames() {
 		ok := slices.Contains(allowed, v1alpha1.Size(name))
-		p.Config.Allowed = append(p.Config.Allowed, SizeChoice{Name: name, Allowed: ok})
+		p.Config.Allowed = append(p.Config.Allowed, SizeChoice{Name: name, Spec: sizeSpec(name), Allowed: ok})
 		if ok {
-			p.Sizes = append(p.Sizes, name)
+			p.Sizes = append(p.Sizes, SizeOption{Name: name, Label: sizeLabel(name)})
 		}
 	}
 	for i := range v.Crews {
@@ -189,6 +198,42 @@ func sizeNames() []string {
 		string(v1alpha1.SizeMini), string(v1alpha1.SizeLight),
 		string(v1alpha1.SizeDevelopment), string(v1alpha1.SizePower),
 	}
+}
+
+// sizeSpec renders a tier's CPU, memory and disk from its profile, blank if unknown.
+func sizeSpec(name string) string {
+	sp, ok := v1alpha1.SizeProfiles[v1alpha1.Size(name)]
+	if !ok {
+		return ""
+	}
+	cpu := resource.MustParse(sp.CPURequest)
+	return fmt.Sprintf("%g CPU · %s RAM · %s disk", float64(cpu.MilliValue())/1000, sp.Memory, sp.Storage)
+}
+
+func sizeLabel(name string) string {
+	if spec := sizeSpec(name); spec != "" {
+		return name + " — " + spec
+	}
+	return name
+}
+
+// resizeOptions lists the allowed sizes plus the crew's current one, which is
+// always shown and selected; it is disabled only when the config no longer allows it.
+func resizeOptions(p Page, current string) []SizeOption {
+	var out []SizeOption
+	for _, name := range sizeNames() {
+		inList := slices.ContainsFunc(p.Sizes, func(o SizeOption) bool { return o.Name == name })
+		switch {
+		case name == current:
+			out = append(out, SizeOption{Name: name, Label: sizeLabel(name), Disabled: !inList})
+		case inList:
+			out = append(out, SizeOption{Name: name, Label: sizeLabel(name)})
+		}
+	}
+	if current != "" && !slices.Contains(sizeNames(), current) {
+		out = append(out, SizeOption{Name: current, Label: current, Disabled: true})
+	}
+	return out
 }
 
 func crewPhase(c *v1alpha1.KiroCrew) string {

@@ -156,7 +156,7 @@ func TestStartStopWritesAreRateLimited(t *testing.T) {
 
 func TestHTMXStartRendersCrewsWithNotice(t *testing.T) {
 	e := newEnv(t, []string{testDomain}, crewPeople()...)
-	w := e.post(alice, pathStart, url.Values{}, "HX-Request", htmxOn)
+	w := e.post(alice, pathStart, url.Values{}, hdrHX, htmxOn)
 	body := w.Body.String()
 	if w.Code != http.StatusOK || strings.Contains(body, "<html") || !strings.Contains(body, "Crew starting.") ||
 		!strings.Contains(body, `hx-post="/crews/alice/stop"`) {
