@@ -32,6 +32,13 @@ updates:
     labels:
       - dependencies
       - github-actions
+    # CodeQL requires every github/codeql-action step (init, autobuild,
+    # analyze, upload-sarif) on the SAME version, so a PR bumping one step
+    # alone fails CI. Group them into one PR that bumps all steps together.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
 
   # The operator's own Go dependencies.
   - package-ecosystem: gomod
