@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -321,13 +322,19 @@ func (r *KiroCrewReconciler) reconcileServiceAccount(ctx context.Context, crew *
 	return err
 }
 
-// reconcileNetworkPolicy denies all pod-to-pod ingress to the instance.
+// reconcileNetworkPolicy denies all ingress and limits egress to UDP, TCP 443
+// and TCP 53.
 //
-// Defence in depth rather than the primary control: the gateway already binds
-// loopback only, so this closes the pod network as well and keeps one crew from
-// reaching another. Egress is deliberately unrestricted — crews call Bedrock,
-// MCP servers and the wider internet.
+// Defence in depth: the gateway already binds loopback only, so this also closes
+// the pod network and keeps one crew from reaching another. Access arrives over
+// the tunnel the pod itself opens, so replies need no ingress rule.
 func (r *KiroCrewReconciler) reconcileNetworkPolicy(ctx context.Context, crew *kirocrewv1alpha1.KiroCrew) error {
+	var (
+		protoTCP = corev1.ProtocolTCP
+		protoUDP = corev1.ProtocolUDP
+		port443  = intstr.FromInt32(443)
+		port53   = intstr.FromInt32(53)
+	)
 	np := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instanceName(crew),
@@ -338,10 +345,21 @@ func (r *KiroCrewReconciler) reconcileNetworkPolicy(ctx context.Context, crew *k
 		np.Labels = labelsFor(crew)
 		np.Spec = networkingv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{MatchLabels: labelsFor(crew)},
-			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress,
+			},
 			// No ingress rules: nothing on the pod network may connect. Access
 			// arrives over WireGuard inside the pod, not through the cluster.
 			Ingress: []networkingv1.NetworkPolicyIngressRule{},
+			// No `to`: any destination. SSH 22 and HTTP 80 are not allowed.
+			Egress: []networkingv1.NetworkPolicyEgressRule{
+				// WireGuard direct path (peer ports are often random) and STUN 3478.
+				{Ports: []networkingv1.NetworkPolicyPort{{Protocol: &protoUDP}}},
+				// Tailscale control plane, DERP fallback, and the crew's own HTTPS.
+				{Ports: []networkingv1.NetworkPolicyPort{{Protocol: &protoTCP, Port: &port443}}},
+				// DNS over TCP; UDP 53 is covered by the UDP rule.
+				{Ports: []networkingv1.NetworkPolicyPort{{Protocol: &protoTCP, Port: &port53}}},
+			},
 		}
 		return controllerutil.SetControllerReference(crew, np, r.Scheme)
 	})

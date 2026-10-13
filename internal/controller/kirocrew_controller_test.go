@@ -98,12 +98,35 @@ var _ = Describe("KiroCrew Controller", func() {
 				Name: "KIRO_AUTH_INSTALL_SHAPE", Value: "remote",
 			}))
 
-			By("closing the pod network to everything")
+			By("denying ingress and limiting egress to UDP, TCP 443 and TCP 53")
 			var np networkingv1.NetworkPolicy
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name: name, Namespace: resourceNamespace,
-			}, &np)).To(Succeed())
+			npKey := types.NamespacedName{Name: name, Namespace: resourceNamespace}
+			Expect(k8sClient.Get(ctx, npKey, &np)).To(Succeed())
+			Expect(np.Spec.PolicyTypes).To(ConsistOf(
+				networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress))
 			Expect(np.Spec.Ingress).To(BeEmpty())
+			Expect(np.Spec.Egress).To(HaveLen(3))
+			for _, rule := range np.Spec.Egress {
+				Expect(rule.To).To(BeEmpty())
+				Expect(rule.Ports).To(HaveLen(1))
+			}
+			udp, tcp443, tcp53 := np.Spec.Egress[0].Ports[0], np.Spec.Egress[1].Ports[0], np.Spec.Egress[2].Ports[0]
+			Expect(*udp.Protocol).To(Equal(corev1.ProtocolUDP))
+			Expect(udp.Port).To(BeNil())
+			Expect(*tcp443.Protocol).To(Equal(corev1.ProtocolTCP))
+			Expect(tcp443.Port.IntValue()).To(Equal(443))
+			Expect(*tcp53.Protocol).To(Equal(corev1.ProtocolTCP))
+			Expect(tcp53.Port.IntValue()).To(Equal(53))
+
+			By("leaving the policy unchanged on a second reconcile")
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			var np2 networkingv1.NetworkPolicy
+			Expect(k8sClient.Get(ctx, npKey, &np2)).To(Succeed())
+			Expect(np2.ResourceVersion).To(Equal(np.ResourceVersion))
+			Expect(np2.Spec).To(Equal(np.Spec))
 
 			By("delivering the config that makes the gateway trust its tailnet origin")
 			var cm corev1.ConfigMap
