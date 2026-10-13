@@ -8,3 +8,7 @@ table{border-collapse:collapse;width:100%}
 th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #d8dee4;vertical-align:top}
 .muted{color:#57606a}
 button{font:inherit;cursor:pointer}
+form.inline{display:inline;margin:0}
+form.stack{display:grid;gap:.5rem;max-width:32rem;margin-bottom:1.2rem}
+fieldset label{display:block;margin:.2rem 0}
+.error{color:#b42318}

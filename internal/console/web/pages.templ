@@ -6,7 +6,7 @@ templ Layout(p Page) {
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false}'/>
+			<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true}]}'/>
 			<title>Kiro Crew console</title>
 			<link rel="stylesheet" href="/static/console.css"/>
 			<script src="/static/htmx.min.js" defer></script>
@@ -90,8 +90,18 @@ templ Crews(p Page) {
 	}
 }
 
+templ Flash(msg string) {
+	<p class="error" role="alert">{ msg }</p>
+}
+
 templ Requests(p Page) {
 	<h2>Requests</h2>
+	<div id="flash" role="status">
+		if p.Notice != "" {
+			<p>{ p.Notice }</p>
+		}
+	</div>
+	@requestForm(p)
 	if len(p.Requests) == 0 {
 		<p class="muted">No requests.</p>
 	} else {
@@ -107,6 +117,7 @@ templ Requests(p Page) {
 					<th>Decided by</th>
 					<th>Crew</th>
 					<th>Reason</th>
+					<th></th>
 				</tr>
 			</thead>
 			<tbody>
@@ -121,11 +132,51 @@ templ Requests(p Page) {
 						<td>{ q.DecidedBy }</td>
 						<td>{ q.CrewRef }</td>
 						<td>{ q.Reason }</td>
+						<td>
+							if q.CanDecide {
+								<form class="inline" method="post" action={ templ.SafeURL("/requests/" + q.Name + "/decision") } hx-post={ "/requests/" + q.Name + "/decision" } hx-target="#content">
+									<input type="hidden" name="csrf_token" value={ p.CSRF }/>
+									<button type="submit" name="verdict" value="approved">Approve</button>
+									<button type="submit" name="verdict" value="denied">Deny</button>
+								</form>
+							}
+							if q.CanCancel {
+								<form class="inline" method="post" action={ templ.SafeURL("/requests/" + q.Name + "/cancel") } hx-post={ "/requests/" + q.Name + "/cancel" } hx-target="#content">
+									<input type="hidden" name="csrf_token" value={ p.CSRF }/>
+									<button type="submit">Cancel</button>
+								</form>
+							}
+						</td>
 					</tr>
 				}
 			</tbody>
 		</table>
 	}
+}
+
+templ requestForm(p Page) {
+	<h3>Request a crew</h3>
+	if p.NoManager {
+		<p class="muted">No manager set: an admin must approve your request.</p>
+	}
+	<form class="stack" method="post" action="/requests" hx-post="/requests" hx-target="#content">
+		<input type="hidden" name="csrf_token" value={ p.CSRF }/>
+		<label>Size
+			<select name="size">
+				for _, s := range p.Sizes {
+					<option value={ s } selected?={ s == "light" }>{ s }</option>
+				}
+			</select>
+		</label>
+		<fieldset>
+			<legend>Schedule (optional, leave blank to run always)</legend>
+			<label>Up <input name="up" placeholder="0 8 * * 1-5" maxlength="64"/></label>
+			<label>Down <input name="down" placeholder="0 18 * * 1-5" maxlength="64"/></label>
+			<label>Timezone <input name="timezone" placeholder="UTC" maxlength="64"/></label>
+		</fieldset>
+		<label>Reason (optional) <input name="reason" maxlength="500"/></label>
+		<button type="submit">Request</button>
+	</form>
 }
 
 templ Accounts(p Page) {

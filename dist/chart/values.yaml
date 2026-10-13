@@ -256,6 +256,7 @@ console:
 
   ## Exposure is the operator's choice: set class and annotations for a private or
   ## public ingress. SSO is the authentication step either way.
+  ## Rate-limit /auth at your ingress or gateway; the console does not do per-IP limiting.
   ingress:
     enabled: false
     className: ""

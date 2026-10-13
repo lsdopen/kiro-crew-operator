@@ -1,9 +1,10 @@
 {{- if .Values.console.enabled }}
 {{- $ns := .Values.console.crewNamespace }}
 # Least privilege. Accounts are cluster-scoped, so the ClusterRole carries only
-# them (read, plus create for self sign-up). Crews and requests are read-only and,
-# when console.crewNamespace is set, granted in that namespace alone. Nothing else:
-# no Secrets, no pods/exec, no update or patch.
+# them (read, plus create for self sign-up). Crews are read-only. Requests also get
+# create (new request), patch (decision) and delete (cancel). Both are granted in
+# console.crewNamespace alone when it is set. Nothing else: no Secrets, no
+# pods/exec, no update, and no write on crews.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -17,8 +18,11 @@ rules:
 {{- if not $ns }}
 # crewNamespace is empty: the console watches crews and requests in every namespace.
 - apiGroups: ["kirocrew.lsdopen.io"]
-  resources: ["kirocrews", "kirocrewrequests"]
+  resources: ["kirocrews"]
   verbs: ["get", "list", "watch"]
+- apiGroups: ["kirocrew.lsdopen.io"]
+  resources: ["kirocrewrequests"]
+  verbs: ["get", "list", "watch", "create", "patch", "delete"]
 {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -46,8 +50,11 @@ metadata:
     {{- include "kiro-crew-operator.console.labels" . | nindent 4 }}
 rules:
 - apiGroups: ["kirocrew.lsdopen.io"]
-  resources: ["kirocrews", "kirocrewrequests"]
+  resources: ["kirocrews"]
   verbs: ["get", "list", "watch"]
+- apiGroups: ["kirocrew.lsdopen.io"]
+  resources: ["kirocrewrequests"]
+  verbs: ["get", "list", "watch", "create", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

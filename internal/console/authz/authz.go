@@ -115,6 +115,8 @@ type View struct {
 	Requests []v1alpha1.KiroCrewRequest
 	// Accounts is set for admins only.
 	Accounts []v1alpha1.KiroCrewAccount
+	// Decidable names the requests Me may approve or deny, by CanDecide.
+	Decidable map[string]bool
 }
 
 // Visible lists what me may see: users their own, managers also their reports',
@@ -137,7 +139,7 @@ func (s *Store) Visible(ctx context.Context, me *v1alpha1.KiroCrewAccount) (*Vie
 	v := &View{Me: me}
 	if me.Spec.Role == v1alpha1.RoleAdmin {
 		v.Crews, v.Requests, v.Accounts = crews.Items, reqs.Items, accounts.Items
-		return v, nil
+		return v.markDecidable(accounts.Items), nil
 	}
 	people := []string{me.Spec.Email}
 	if me.Spec.Role == v1alpha1.RoleManager {
@@ -157,7 +159,18 @@ func (s *Store) Visible(ctx context.Context, me *v1alpha1.KiroCrewAccount) (*Vie
 			v.Requests = append(v.Requests, reqs.Items[i])
 		}
 	}
-	return v, nil
+	return v.markDecidable(accounts.Items), nil
+}
+
+func (v *View) markDecidable(accounts []v1alpha1.KiroCrewAccount) *View {
+	v.Decidable = map[string]bool{}
+	for i := range v.Requests {
+		q := &v.Requests[i]
+		if CanDecide(v.Me, FindAccount(accounts, q.Spec.Requester)) {
+			v.Decidable[q.Name] = true
+		}
+	}
+	return v
 }
 
 func isOneOf(people []string, email string) bool {

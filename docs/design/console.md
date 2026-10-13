@@ -107,7 +107,7 @@ MUST hold only crew pods, because `pods/exec` below is namespace-wide.
 | Role (crewNamespace) | `kirocrews` | get, list, watch | 3a |
 | Role (crewNamespace) | `kirocrews` | patch (only `suspend`/`startedAt`; code-enforced) | 3c |
 | Role (crewNamespace) | `kirocrewrequests` | get, list, watch | 3a |
-| Role (crewNamespace) | `kirocrewrequests` | create, patch | 3b |
+| Role (crewNamespace) | `kirocrewrequests` | create, patch, delete (delete is "cancel my Pending request") | 3b |
 | Role (crewNamespace) | `pods` | get | 3c |
 | Role (crewNamespace) | `pods/exec` | create (+ get for the WebSocket upgrade on API servers that authorize it as get) | 3c |
 
@@ -174,7 +174,7 @@ granting `pods/exec`.
 | Target | The host is taken only from `status.dashboardURL`, which must be `https://` with a host ending `.<tailnet.domain>`. Otherwise the request is refused. |
 | Response | `303`, `Location: <dashboardURL>/?token=<t>`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, and an empty body. |
 | Logging | The broker handler's logger has no URL or header fields. A unit test asserts the token is absent from all log output. The access-log middleware logs method, path and status, never response headers. |
-| Ingress | The default nginx and Traefik access logs, and AWS ALB access logs, record the request line, not response headers. Docs warn against custom formats that log `$sent_http_location`. oauth2-proxy in front: confirm it does not log upstream response headers. |
+| Ingress | Common ingress controllers' default access logs (nginx, Traefik, AWS ALB) record the request line, not response headers. Docs warn against custom formats that log the response `Location` header. oauth2-proxy in front: confirm it does not log upstream response headers. |
 | Browser | The URL lands in history. The link window is 5 min and the nonce is single-use. It redeems only via the owner's tailnet identity. |
 
 ### Option (b) upstream proposal (outline)
@@ -208,7 +208,7 @@ console links `dashboardURL` directly.
 | Revocation | Role is re-read per request, so demoting takes effect immediately. With self sign-up, deleting an account no longer revokes sign-in: the next login recreates it as `user` with no manager. Blocking a person means removing their domain from `allowedDomains` or their Workspace account. Rotating `cookieKey` logs out everyone. |
 | CSRF | Every unsafe method needs `X-CSRF-Token` (htmx `hx-headers` from a `<meta>`) or a form field equal to `HMAC(cookieKey, sid)`. Also Go's `http.CrossOriginProtection` (Origin / `Sec-Fetch-Site`). |
 | Headers | CSP `default-src 'self'; frame-ancestors 'none'`, HSTS, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` on authed pages |
-| Rate limits | Per client IP on `/auth/*` (from `X-Forwarded-For`, trusted only from `console.trustedProxies` CIDRs), per session on writes and `/open`. Ingress annotations can add more. |
+| Rate limits | Per session on writes and `/open`. The app does no per-IP limiting and does not read forwarded headers: behind an ingress the remote address is the ingress pod, so limiting `/auth/*` per IP is the ingress or gateway's job. |
 | Secrets | Secret named by `console.auth.existingSecret`, with keys `client-id`, `client-secret` and `cookie-key` (32 bytes). Never in values.yaml. The chart fails if it is unset. |
 | Other providers later | The config shape is `auth.provider` + `auth.issuerURL` + `auth.domainClaim` (Google: `hd`). Adding Entra or Okta later means a new claim mapping and no redesign. Not built now. |
 
@@ -218,7 +218,7 @@ Two homes, split by plane and blast radius:
 
 | Where | What | Why |
 |---|---|---|
-| **Chart values** (deployment plane) | `console.auth.allowedDomains`, `auth.provider`, `auth.issuerURL`, `auth.redirectURL`, `auth.existingSecret`, `crewNamespace`, `trustedProxies`, ingress | Login policy must exist before any admin can sign in, so it cannot bootstrap from a CR the console edits. It is also the authentication and account-creation boundary (Decision 3): if it lived in a CR, one compromised admin session could widen sign-up to any domain. Changing it is a reviewed `helm upgrade`. |
+| **Chart values** (deployment plane) | `console.auth.allowedDomains`, `auth.provider`, `auth.issuerURL`, `auth.redirectURL`, `auth.existingSecret`, `crewNamespace`, ingress | Login policy must exist before any admin can sign in, so it cannot bootstrap from a CR the console edits. It is also the authentication and account-creation boundary (Decision 3): if it lived in a CR, one compromised admin session could widen sign-up to any domain. Changing it is a reviewed `helm upgrade`. |
 | **`KiroCrewConfig`** (cluster-scoped singleton, name `default`, enforced by CEL `self.metadata.name == 'default'`) | Product defaults admins tune day to day | Read by both the console and the operator. Edited in the console in 3d. |
 
 `KiroCrewConfig.spec`:
@@ -245,7 +245,6 @@ console:
   replicas: 2
   image: {repository: ghcr.io/example-org/kiro-crew-console, tag: "", pullPolicy: IfNotPresent}
   crewNamespace: kiro-crews
-  trustedProxies: []            # CIDRs of the ingress controller
   auth:
     provider: google
     issuerURL: https://accounts.google.com
@@ -256,7 +255,7 @@ console:
     enabled: false
     className: ""
     host: console.example.com
-    annotations: {}             # WAF, IP allowlist, oauth2-proxy, cert-manager issuer
+    annotations: {}             # WAF, IP allowlist, /auth rate limit, oauth2-proxy, cert-manager issuer
     tls:
       enabled: true
       secretName: ""            # supplied cert, or let cert-manager fill it
@@ -269,11 +268,10 @@ The docs recommend private and present public as the opt-in. The Google
 callback is a browser redirect, so a private host works; the console Pod needs
 egress to the provider's discovery and JWKS endpoints either way.
 
-Private, AWS ALB with the internal scheme (TLS terminates at the ALB via ACM):
+Private, AWS ALB with the internal scheme (TLS terminates at the ALB via ACM). One example controller, not a requirement:
 
 ```yaml
 console:
-  trustedProxies: [10.0.0.0/16]          # VPC CIDR the ALB ENIs sit in
   auth:
     redirectURL: https://console.internal.example.com/auth/callback
   ingress:
@@ -289,11 +287,10 @@ console:
       enabled: true
 ```
 
-Public, ingress-nginx with cert-manager TLS:
+Public, with cert-manager TLS. nginx is one example controller, not a requirement:
 
 ```yaml
 console:
-  trustedProxies: [10.42.0.0/16]         # pod CIDR of the ingress-nginx controller
   auth:
     redirectURL: https://console.example.com/auth/callback
   ingress:
@@ -308,11 +305,9 @@ console:
       secretName: console-example-com-tls
 ```
 
-Templates: `templates/console/{deployment,service,ingress,serviceaccount,rbac,vap}.yaml`,
-plus a NetworkPolicy allowing ingress only from the ingress controller
-namespace (with an ALB in `ip` mode, traffic arrives from the ALB's subnets,
-so the policy admits the `trustedProxies` CIDRs instead). The Pod runs non-root with a read-only rootfs and drops ALL
-capabilities. `tailnet.domain` is reused for redirect validation.
+Templates: `templates/console/{deployment,service,ingress,serviceaccount,rbac,vap}.yaml`.
+There is no console NetworkPolicy; adding one is left to the operator for now. The Pod runs
+non-root with a read-only rootfs and drops ALL capabilities. `tailnet.domain` is reused for redirect validation.
 
 ## Threat model
 
@@ -331,8 +326,8 @@ the authentication step regardless.
 | Manager approves a non-report | Code check plus the operator's `canDecide` (marks the request `Invalid`). A user with no manager has no manager-approver; only admins can approve. |
 | Sign-in token leak | Only in one `Location` header to the verified owner; never logged or stored; 5 min, single-use, and redeemable only via the owner's tailnet identity |
 | Console compromise | VAP limits exec to `kirocrew token`; no Secrets access; crews stay tailnet-gated, so a minted link is useless to an attacker who is not the owner |
-| Brute force / DoS on the console's Ingress, private or public | Per-IP limits on `/auth/*`, per-session limits on writes and `/open`, ingress-level limits via annotations, 2 stateless replicas |
-| Ingress header spoofing | `X-Forwarded-For` trusted only from `trustedProxies`; NetworkPolicy admits only the ingress controller |
+| Brute force / DoS on the console's Ingress, private or public | Per-session limits on writes and `/open`, per-IP limits on `/auth/*` at the ingress or gateway, 2 stateless replicas |
+| Ingress header spoofing | The app trusts no forwarded headers |
 | SSO is the single factor | Accepted (Decision 5). Workspace-level MFA is the layer above it; a private ingress is recommended in the docs and an ingress allowlist is optional. |
 
 ## Build plan
@@ -340,6 +335,6 @@ the authentication step regardless.
 | Phase | Delivers | RBAC added | Exit test |
 |---|---|---|---|
 | **3a** login + read-only | OIDC login, sessions, CSRF scaffold, account resolution with first-login sign-up (role `user`, no manager), read-only views of own crew / requests (user), reports' (manager), all (admin); crew card with `dashboardURL` link and owner-only `tailnetLoginURL`; image, chart, ingress, release step; `KiroCrewConfig` CRD (read-only) | accounts create + read, configs/crews/requests read | envtest + httptest: empty-domain refusal, wrong `hd`, missing `email_verified`, first login creates a `user` account with no manager, role views |
-| **3b** requests + approvals | Request form (`allowedSizes`, defaults), approve/deny with `decision.by` from session (no admission policy, Decision 4); request controller honours `allowedSizes` | requests create, patch | posted `by=`/`requester=` ignored; non-manager approval → 403; a no-manager user's request is approvable only by an admin |
+| **3b** requests + approvals | Request form (sizes, optional schedule), cancel own Pending request, approve/deny with `decision.by` from session (no admission policy, Decision 4); per-session write rate limits. `allowedSizes`/`defaultSize` wait for the `KiroCrewConfig` editor in 3d | requests create, patch, delete | posted `by=`/`requester=` ignored; non-manager approval → 403; a no-manager user's request is approvable only by an admin |
 | **3c** start/stop + sign-in | `startedAt` field + `computeDesired`/`inUpWindow` change: latest of last Up, last Down, `startedAt` wins, requeue includes next Down after `startedAt` (Decision 1); start/stop; broker with exec VAP; re-verify gateway facts on the pinned image | crews patch, pods get, pods/exec | the token never appears in logs (captured logger); the VAP denies `sh`; non-owner `/open` → 403; a redirect host outside `tailnet.domain` → refused |
 | **3d** admin config | Accounts CRUD (last-admin guard), `KiroCrewConfig` editor; crew controller reads images and MCP ref from config | accounts write, config `default` write | demote-last-admin refused; config change rolls gateway image on the next reconcile |

@@ -25,6 +25,12 @@ type Page struct {
 	Accounts []AccountRow
 	// ShowOwner adds the owner column, for views that span several people.
 	ShowOwner bool
+	// Notice is a one-line result of the last action.
+	Notice string
+	// Sizes are the choices on the request form.
+	Sizes []string
+	// NoManager warns that only an admin can approve this person's requests.
+	NoManager bool
 }
 
 // CrewRow is one crew card row.
@@ -47,6 +53,9 @@ type RequestRow struct {
 	DecidedBy string
 	CrewRef   string
 	Reason    string
+	// CanDecide and CanCancel gate the row's buttons; the server checks again on post.
+	CanDecide bool
+	CanCancel bool
 }
 
 // AccountRow is one account, shown to admins.
@@ -62,12 +71,18 @@ func newPage(v *authz.View, csrf, active string) Page {
 	p := Page{
 		Email: me, Role: string(v.Me.Spec.Role), CSRF: csrf, Active: active,
 		ShowOwner: v.Me.Spec.Role != v1alpha1.RoleUser,
+		Sizes:     sizeNames(), NoManager: v.Me.Spec.Manager == "",
 	}
 	for i := range v.Crews {
 		p.Crews = append(p.Crews, crewRow(&v.Crews[i], me))
 	}
 	for i := range v.Requests {
-		p.Requests = append(p.Requests, requestRow(&v.Requests[i]))
+		q := &v.Requests[i]
+		row := requestRow(q)
+		pending := authz.Pending(q)
+		row.CanDecide = pending && v.Decidable[q.Name]
+		row.CanCancel = pending && strings.EqualFold(q.Spec.Requester, me)
+		p.Requests = append(p.Requests, row)
 	}
 	for i := range v.Accounts {
 		a := &v.Accounts[i].Spec
@@ -102,6 +117,14 @@ func requestRow(q *v1alpha1.KiroCrewRequest) RequestRow {
 	return RequestRow{
 		Name: q.Name, Requester: q.Spec.Requester, Size: string(q.Spec.Size), Phase: phase,
 		DecidedBy: q.Status.DecidedBy, CrewRef: q.Status.CrewRef, Reason: q.Spec.Reason,
+	}
+}
+
+// sizeNames lists the tiers smallest first.
+func sizeNames() []string {
+	return []string{
+		string(v1alpha1.SizeMini), string(v1alpha1.SizeLight),
+		string(v1alpha1.SizeDevelopment), string(v1alpha1.SizePower),
 	}
 }
 

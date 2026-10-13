@@ -144,6 +144,23 @@ var _ = Describe("KiroCrewRequest Controller", func() {
 		Expect(crewExists(reqCrewName)).To(BeFalse())
 	})
 
+	It("provisions a crew once the console patches a decision onto a Pending request", func() {
+		key := newRequest(reqRequester, "", "")
+		Expect(reconcileRequest(key).Status.Phase).To(Equal(kirocrewv1alpha1.PhasePending))
+
+		// The console's write: a merge patch of spec.decision with an optimistic lock.
+		request := &kirocrewv1alpha1.KiroCrewRequest{}
+		Expect(k8sClient.Get(ctx, key, request)).To(Succeed())
+		orig := request.DeepCopy()
+		request.Spec.Decision = &kirocrewv1alpha1.Decision{Verdict: kirocrewv1alpha1.VerdictApproved, By: reqManager}
+		Expect(k8sClient.Patch(ctx, request, client.MergeFromWithOptions(orig, client.MergeFromWithOptimisticLock{}))).To(Succeed())
+
+		request = reconcileRequest(key)
+		Expect(request.Status.Phase).To(Equal(kirocrewv1alpha1.PhaseProvisioned))
+		Expect(request.Status.DecidedBy).To(Equal(reqManager))
+		Expect(crewExists(reqCrewName)).To(BeTrue())
+	})
+
 	It("creates one crew however often it reconciles", func() {
 		key := newRequest(reqRequester, kirocrewv1alpha1.VerdictApproved, reqManager)
 		first := reconcileRequest(key)
