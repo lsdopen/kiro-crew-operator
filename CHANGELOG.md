@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.10](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.9...v0.2.10) (2026-10-13)
+
+
+### Bug Fixes
+
+* **console:** show current size in resize select; add size specs ([#71](https://github.com/lsdopen/kiro-crew-operator/issues/71)) ([0690279](https://github.com/lsdopen/kiro-crew-operator/commit/06902797039296b1723c6344d11ef41618da6152))
+
 ## [0.2.9](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.8...v0.2.9) (2026-10-13)
 
 
