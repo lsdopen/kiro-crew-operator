@@ -18,8 +18,8 @@ import (
 	v1alpha1 "github.com/lsdopen/kiro-crew-operator/api/v1alpha1"
 )
 
-// Store reads from the informer cache and falls back to the live API only to
-// settle a sign-up race.
+// Store reads from the informer cache and falls back to the live API on an
+// account cache miss, to settle a sign-up race.
 type Store struct {
 	// Client reads (cached) and creates accounts.
 	Client client.Client
@@ -50,7 +50,17 @@ func (s *Store) Find(ctx context.Context, email string) (*v1alpha1.KiroCrewAccou
 	if a := FindAccount(list.Items, email); a != nil {
 		return a.DeepCopy(), nil
 	}
-	return nil, nil //nolint:nilnil // nil means "no such account"
+	// The cache may not have seen a just-created account yet; ask the API server
+	// so a first login does not need a second Google round-trip.
+	got := &v1alpha1.KiroCrewAccount{}
+	err := s.Live.Get(ctx, client.ObjectKey{Name: AccountName(email)}, got)
+	if apierrors.IsNotFound(err) {
+		return nil, nil //nolint:nilnil // nil means "no such account"
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading account live: %w", err)
+	}
+	return got, nil
 }
 
 // Resolve returns the account for email, creating a role=user, no-manager one on

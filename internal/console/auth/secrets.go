@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -12,7 +13,8 @@ import (
 type Secrets struct {
 	ClientID     string
 	ClientSecret string
-	CookieKey    []byte
+	// CookieKey is the base64-decoded cookie-key, at least MinKeyLen bytes.
+	CookieKey []byte
 }
 
 // LoadSecrets reads client-id, client-secret and cookie-key from dir.
@@ -40,8 +42,27 @@ func LoadSecrets(dir string) (*Secrets, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.CookieKey = []byte(key)
+	if s.CookieKey, err = decodeCookieKey(key); err != nil {
+		return nil, err
+	}
 	return &s, nil
+}
+
+// decodeCookieKey requires base64 (standard or URL alphabet) of at least
+// MinKeyLen random bytes, so a typed passphrase cannot be used as the key.
+func decodeCookieKey(v string) ([]byte, error) {
+	for _, enc := range []*base64.Encoding{
+		base64.StdEncoding, base64.URLEncoding, base64.RawStdEncoding, base64.RawURLEncoding,
+	} {
+		if b, err := enc.DecodeString(v); err == nil {
+			if len(b) < MinKeyLen {
+				return nil, fmt.Errorf("cookie-key decodes to %d bytes, need at least %d; "+
+					"generate one with: openssl rand -base64 32", len(b), MinKeyLen)
+			}
+			return b, nil
+		}
+	}
+	return nil, errors.New("cookie-key is not valid base64; generate one with: openssl rand -base64 32")
 }
 
 // ValidateDomains makes an empty allow list a startup error, so the

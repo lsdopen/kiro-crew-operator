@@ -1,6 +1,9 @@
 {{- if .Values.console.enabled }}
-# Read-only on crews, requests and accounts; create on accounts for self sign-up.
-# Nothing else: no Secrets, no pods/exec, no update or patch.
+{{- $ns := .Values.console.crewNamespace }}
+# Least privilege. Accounts are cluster-scoped, so the ClusterRole carries only
+# them (read, plus create for self sign-up). Crews and requests are read-only and,
+# when console.crewNamespace is set, granted in that namespace alone. Nothing else:
+# no Secrets, no pods/exec, no update or patch.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -9,11 +12,14 @@ metadata:
     {{- include "kiro-crew-operator.console.labels" . | nindent 4 }}
 rules:
 - apiGroups: ["kirocrew.lsdopen.io"]
-  resources: ["kirocrews", "kirocrewrequests", "kirocrewaccounts"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: ["kirocrew.lsdopen.io"]
   resources: ["kirocrewaccounts"]
-  verbs: ["create"]
+  verbs: ["get", "list", "watch", "create"]
+{{- if not $ns }}
+# crewNamespace is empty: the console watches crews and requests in every namespace.
+- apiGroups: ["kirocrew.lsdopen.io"]
+  resources: ["kirocrews", "kirocrewrequests"]
+  verbs: ["get", "list", "watch"]
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -29,4 +35,34 @@ subjects:
 - kind: ServiceAccount
   name: {{ include "kiro-crew-operator.console.name" . }}
   namespace: {{ .Release.Namespace }}
+{{- if $ns }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "kiro-crew-operator.console.name" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kiro-crew-operator.console.labels" . | nindent 4 }}
+rules:
+- apiGroups: ["kirocrew.lsdopen.io"]
+  resources: ["kirocrews", "kirocrewrequests"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "kiro-crew-operator.console.name" . }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "kiro-crew-operator.console.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "kiro-crew-operator.console.name" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "kiro-crew-operator.console.name" . }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- end }}

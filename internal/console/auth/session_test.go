@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,7 +20,11 @@ func newTestSealer(t *testing.T, key string) *Sealer {
 	return s
 }
 
-const testKey = "0123456789abcdef0123456789abcdef"
+const (
+	testKey = "0123456789abcdef0123456789abcdef"
+	// base64 of testKey (32 bytes).
+	testKeyB64 = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+)
 
 func reqWith(c *http.Cookie) *http.Request {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -128,6 +133,42 @@ func TestNewSealerShortKey(t *testing.T) {
 	}
 }
 
+func TestLoadSecretsCookieKey(t *testing.T) {
+	std := base64.StdEncoding.EncodeToString([]byte(testKey + "??>>"))
+	url := base64.URLEncoding.EncodeToString([]byte(testKey + "??>>"))
+	if std == url {
+		t.Fatal("test key must differ between alphabets")
+	}
+	tests := []struct {
+		name, key string
+		ok        bool
+	}{
+		{"std base64, 32 bytes", testKeyB64, true},
+		{"std alphabet", std, true},
+		{"url alphabet", url, true},
+		{"31 bytes", base64.StdEncoding.EncodeToString([]byte(testKey[:31])), false},
+		{"raw 32-char passphrase", "0123456789abcdef0123456789abcde", false},
+		{"not base64", "not base64 at all!!", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for n, v := range map[string]string{"client-id": "id", "client-secret": "s", "cookie-key": tt.key} {
+				if err := os.WriteFile(filepath.Join(dir, n), []byte(v), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s, err := LoadSecrets(dir)
+			if tt.ok && (err != nil || len(s.CookieKey) < MinKeyLen) {
+				t.Fatalf("rejected: %v", err)
+			}
+			if !tt.ok && (err == nil || !strings.Contains(err.Error(), "openssl rand -base64 32")) {
+				t.Fatalf("err = %v, want a refusal naming openssl", err)
+			}
+		})
+	}
+}
+
 func TestLoadSecrets(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, v string) {
@@ -140,7 +181,7 @@ func TestLoadSecrets(t *testing.T) {
 	if _, err := LoadSecrets(dir); err == nil {
 		t.Fatal("missing cookie-key accepted")
 	}
-	write("cookie-key", testKey+"\n")
+	write("cookie-key", testKeyB64+"\n")
 	s, err := LoadSecrets(dir)
 	if err != nil || s.ClientID != "id" || s.ClientSecret != "sec" || string(s.CookieKey) != testKey {
 		t.Fatalf("got %+v %v", s, err)

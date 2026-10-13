@@ -1,8 +1,12 @@
 # Build the console binary. Build from the repo root:
 #   docker build -f images/console/Containerfile .
-ARG BASE_IMAGE=golang:1.26
+#
+# Bases are literal `repo:tag@sha256:digest` so Dependabot can follow them (it
+# cannot see a digest behind an ARG); see images/gateway/Containerfile. Keep the
+# golang tag precise: a rolling tag re-digests on every upstream rebuild.
+#
 # Cross-compile on the build host instead of emulating the target (see Dockerfile).
-FROM --platform=${BUILDPLATFORM} ${BASE_IMAGE} AS builder
+FROM --platform=${BUILDPLATFORM} docker.io/library/golang:1.26.9@sha256:d7722066f0b60ceccb6c0643cbed1f5f9e15506ac237146c95333504d7805d89 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -14,7 +18,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o console ./cmd/console
 
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 WORKDIR /
 COPY --from=builder /workspace/console .
 USER 65532:65532

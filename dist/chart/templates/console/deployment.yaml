@@ -37,7 +37,7 @@ spec:
         - --bind-address=:8080
         - --auth-provider={{ .Values.console.auth.provider }}
         - --auth-issuer-url={{ .Values.console.auth.issuerURL }}
-        - --auth-redirect-url={{ .Values.console.auth.redirectURL }}
+        - --auth-redirect-url={{ required "console.auth.redirectURL is required" .Values.console.auth.redirectURL }}
         - --auth-allowed-domains={{ join "," .Values.console.auth.allowedDomains }}
         {{- if .Values.console.auth.allowEmptyDomains }}
         - --auth-allow-empty-domains
@@ -73,7 +73,7 @@ spec:
       volumes:
       - name: auth
         secret:
-          # Holds client-id, client-secret and cookie-key (at least 32 bytes).
+          # Holds client-id, client-secret and cookie-key (base64, 32+ bytes).
           secretName: {{ required "console.auth.existingSecret is required" .Values.console.auth.existingSecret }}
           defaultMode: 0440
 {{- end }}

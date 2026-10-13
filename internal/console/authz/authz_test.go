@@ -99,6 +99,24 @@ func TestResolveConcurrentFirstLogins(t *testing.T) {
 	}
 }
 
+func TestFindFallsBackToLiveOnCacheMiss(t *testing.T) {
+	existing := account("alice@example.com", v1alpha1.RoleManager, "")
+	live := fake.NewClientBuilder().WithScheme(scheme(t)).WithObjects(existing).Build()
+	stale := interceptor.NewClient(live, interceptor.Funcs{
+		List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
+			return nil
+		},
+	})
+	s := &Store{Client: stale, Live: live, CrewNamespace: ns}
+	a, err := s.Find(context.Background(), "Alice@Example.com")
+	if err != nil || a == nil || a.Spec.Role != v1alpha1.RoleManager {
+		t.Fatalf("Find = %+v, %v; want the live account", a, err)
+	}
+	if a, err := s.Find(context.Background(), "nobody@example.com"); err != nil || a != nil {
+		t.Fatalf("Find(absent) = %+v, %v; want nil, nil", a, err)
+	}
+}
+
 func TestResolveLosesRaceWithStaleCache(t *testing.T) {
 	// The cached List sees nothing, but the account already exists live: Create
 	// conflicts and Resolve must return the existing account, not overwrite it.

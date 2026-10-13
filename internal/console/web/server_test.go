@@ -144,7 +144,7 @@ func TestLoginCreatesOneUserAccountAndASession(t *testing.T) {
 	e := newEnv(t, []string{testDomain})
 	for range 2 {
 		w := e.signIn(nil)
-		if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/crews" {
+		if w.Code != http.StatusSeeOther || w.Header().Get("Location") != crewsPath {
 			t.Fatalf("callback = %d %s", w.Code, w.Header().Get("Location"))
 		}
 		s := cookie(w, auth.SessionCookie)
@@ -233,7 +233,7 @@ func TestLoginAuthURL(t *testing.T) {
 		r.AddCookie(cookie(w, auth.OAuthCookie))
 		return r
 	}())
-	if err != nil || st.Return != "/crews" {
+	if err != nil || st.Return != crewsPath {
 		t.Fatalf("open redirect not neutralised: %+v %v", st, err)
 	}
 	// Two domains: no hd hint.
@@ -241,6 +241,47 @@ func TestLoginAuthURL(t *testing.T) {
 	u2, _ := url.Parse(e2.do(http.MethodGet, "/auth/login", nil, nil, "").Header().Get("Location"))
 	if u2.Query().Get("hd") != "" {
 		t.Error("hd hint sent with several domains")
+	}
+}
+
+func TestLoginReturnIsSameSiteOnly(t *testing.T) {
+	e := newEnv(t, []string{testDomain})
+	tests := []struct{ name, query, want string }{
+		{"plain path", "/requests", "/requests"},
+		{"path with query", "/crews%3Fa%3D1", "/crews?a=1"},
+		{"protocol-relative", "//evil.org", crewsPath},
+		{"encoded tab", "/%09/evil.com", crewsPath},
+		{"encoded backslash", "/%5Cevil.com", crewsPath},
+		{"encoded CRLF", "/%0d%0a", crewsPath},
+		{"absolute URL", "https://evil.com", crewsPath},
+		{"triple slash", "///evil.com", crewsPath},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := e.do(http.MethodGet, "/auth/login?return="+tt.query, nil, nil, "")
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.AddCookie(cookie(w, auth.OAuthCookie))
+			st, err := e.sealer.OpenOAuth(r)
+			if err != nil || st.Return != tt.want {
+				t.Fatalf("return = %q (%v), want %q", st.Return, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestSafeReturn(t *testing.T) {
+	for _, in := range []string{
+		"//evil.org", "/\t/evil.com", "/\\evil.com", "/%09/evil.com", "/%0d%0a", "/\r\n",
+		"https://evil.com", "///evil.com", "evil.com", "", "/\x7f", "/a\x00b",
+	} {
+		if got := safeReturn(in); got != crewsPath {
+			t.Errorf("safeReturn(%q) = %q, want /crews", in, got)
+		}
+	}
+	for _, in := range []string{"/crews", "/requests?x=1", "/accounts"} {
+		if got := safeReturn(in); got != in {
+			t.Errorf("safeReturn(%q) = %q, want unchanged", in, got)
+		}
 	}
 }
 

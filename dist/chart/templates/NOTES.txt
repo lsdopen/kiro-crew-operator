@@ -13,3 +13,11 @@ To learn more about the release, try:
 
   $ helm status {{ .Release.Name }} -n {{ .Release.Namespace }}
   $ helm get all {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- if .Values.console.enabled }}
+
+The console reads its login secret "{{ .Values.console.auth.existingSecret }}" (keys client-id,
+client-secret, cookie-key). cookie-key must be base64 of at least 32 random bytes;
+the console refuses to start otherwise. Generate one with:
+
+  $ openssl rand -base64 32
+{{- end }}

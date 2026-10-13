@@ -26,6 +26,9 @@ var staticFS embed.FS
 // refreshAfter is how stale a session's Seen may get before it is re-sealed.
 const refreshAfter = 5 * time.Minute
 
+// crewsPath is the landing page and the fallback for an unsafe post-login return.
+const crewsPath = "/crews"
+
 // Server wires the handlers. All fields are required.
 type Server struct {
 	Provider       auth.Provider
@@ -48,7 +51,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /auth/callback", s.callback)
 	mux.HandleFunc("POST /auth/logout", s.authed(s.logout))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/crews", http.StatusSeeOther)
+		http.Redirect(w, r, crewsPath, http.StatusSeeOther)
 	})
 	mux.HandleFunc("GET /crews", s.authed(s.page("crews")))
 	mux.HandleFunc("GET /requests", s.authed(s.page("requests")))
@@ -260,10 +263,24 @@ func randomString() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// safeReturn keeps the post-login redirect on this site.
+// safeReturn keeps the post-login redirect on this site. Browsers strip tabs and
+// newlines from a Location, so "/\t/evil.com" would otherwise become "//evil.com".
 func safeReturn(p string) string {
-	if !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") || strings.ContainsAny(p, "\\\r\n") {
-		return "/crews"
+	if hasControlOrBackslash(p) || !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") {
+		return crewsPath
+	}
+	u, err := url.Parse(p)
+	if err != nil || u.Scheme != "" || u.Host != "" || hasControlOrBackslash(u.Path) {
+		return crewsPath
 	}
 	return p
+}
+
+func hasControlOrBackslash(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || r == '\\' {
+			return true
+		}
+	}
+	return false
 }
