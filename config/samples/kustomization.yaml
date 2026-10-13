@@ -1,4 +1,6 @@
 ## Append samples of your project ##
 resources:
 - kirocrew_v1alpha1_kirocrew.yaml
+- kirocrew_v1alpha1_kirocrewaccount.yaml
+- kirocrew_v1alpha1_kirocrewrequest.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

@@ -22,6 +22,12 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the kiro-crew-operator itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- kirocrewrequest_admin_role.yaml
+- kirocrewrequest_editor_role.yaml
+- kirocrewrequest_viewer_role.yaml
+- kirocrewaccount_admin_role.yaml
+- kirocrewaccount_editor_role.yaml
+- kirocrewaccount_viewer_role.yaml
 - kirocrew_admin_role.yaml
 - kirocrew_editor_role.yaml
 - kirocrew_viewer_role.yaml

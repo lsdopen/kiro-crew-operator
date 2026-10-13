@@ -1,0 +1,17 @@
+apiVersion: kirocrew.lsdopen.io/v1alpha1
+kind: KiroCrewRequest
+metadata:
+  name: someone
+  namespace: kiro-crew
+spec:
+  requester: someone@example.com
+  size: light
+  reason: Daily development work
+  schedule:
+    up: "0 8 * * 1-5"
+    down: "0 18 * * 1-5"
+    timezone: Africa/Johannesburg
+  # Written by the approver (via the console) to provision the crew:
+  # decision:
+  #   verdict: approved
+  #   by: boss@example.com

@@ -3,6 +3,8 @@
 # It should be run by config/default
 resources:
 - bases/kirocrew.lsdopen.io_kirocrews.yaml
+- bases/kirocrew.lsdopen.io_kirocrewaccounts.yaml
+- bases/kirocrew.lsdopen.io_kirocrewrequests.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

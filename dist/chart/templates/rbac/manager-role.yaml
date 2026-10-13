@@ -59,6 +59,15 @@ rules:
 - apiGroups:
   - kirocrew.lsdopen.io
   resources:
+  - kirocrewaccounts
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kirocrew.lsdopen.io
+  resources:
+  - kirocrewrequests
   - kirocrews
   verbs:
   - create
@@ -71,17 +80,20 @@ rules:
 - apiGroups:
   - kirocrew.lsdopen.io
   resources:
+  - kirocrewrequests/finalizers
   - kirocrews/finalizers
   verbs:
   - update
 - apiGroups:
   - kirocrew.lsdopen.io
   resources:
+  - kirocrewrequests/status
   - kirocrews/status
   verbs:
   - get
   - patch
   - update
+# trivy:ignore:KSV-0056 - operator creates a deny-all NetworkPolicy per crew
 - apiGroups:
   - networking.k8s.io
   resources:
