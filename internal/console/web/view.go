@@ -27,8 +27,11 @@ type Page struct {
 	ShowOwner bool
 	// Notice is a one-line result of the last action.
 	Notice string
-	// Sizes are the choices on the request form.
-	Sizes []string
+	// Sizes are the choices on the request form and DefaultSize the preselected one.
+	Sizes       []string
+	DefaultSize string
+	// Config feeds the admin config editor.
+	Config ConfigForm
 	// CanOpen shows the Open button, which needs sign-in brokering.
 	CanOpen bool
 	// NoManager warns that only an admin can approve this person's requests.
@@ -62,8 +65,23 @@ type RequestRow struct {
 	CanCancel bool
 }
 
+// ConfigForm is the config editor's current values. Allowed has one entry per tier.
+type ConfigForm struct {
+	Allowed                                    []SizeChoice
+	DefaultSize                                string
+	GatewayImage, TailscaleImage, MCPConfigRef string
+}
+
+// SizeChoice is one tier and whether the config allows it.
+type SizeChoice struct {
+	Name    string
+	Allowed bool
+}
+
 // AccountRow is one account, shown to admins.
 type AccountRow struct {
+	// Name is the object name the account forms post to.
+	Name        string
 	Email       string
 	DisplayName string
 	Role        string
@@ -72,10 +90,23 @@ type AccountRow struct {
 
 func newPage(v *authz.View, csrf, active string) Page {
 	me := v.Me.Spec.Email
+	allowed, def := v.Config.Sizes()
 	p := Page{
 		Email: me, Role: string(v.Me.Spec.Role), CSRF: csrf, Active: active,
 		ShowOwner: v.Me.Spec.Role != v1alpha1.RoleUser,
-		Sizes:     sizeNames(), NoManager: v.Me.Spec.Manager == "",
+		NoManager: v.Me.Spec.Manager == "", DefaultSize: string(def),
+		Config: ConfigForm{
+			DefaultSize:  string(def),
+			GatewayImage: v.Config.Gateway.Image, TailscaleImage: v.Config.Tailscale.Image,
+			MCPConfigRef: v.Config.MCPConfigRef,
+		},
+	}
+	for _, name := range sizeNames() {
+		ok := slices.Contains(allowed, v1alpha1.Size(name))
+		p.Config.Allowed = append(p.Config.Allowed, SizeChoice{Name: name, Allowed: ok})
+		if ok {
+			p.Sizes = append(p.Sizes, name)
+		}
 	}
 	for i := range v.Crews {
 		row := crewRow(&v.Crews[i], me)
@@ -93,7 +124,7 @@ func newPage(v *authz.View, csrf, active string) Page {
 	for i := range v.Accounts {
 		a := &v.Accounts[i].Spec
 		p.Accounts = append(p.Accounts, AccountRow{
-			Email: a.Email, DisplayName: a.DisplayName, Role: string(a.Role), Manager: a.Manager,
+			Name: v.Accounts[i].Name, Email: a.Email, DisplayName: a.DisplayName, Role: string(a.Role), Manager: a.Manager,
 		})
 	}
 	slices.SortFunc(p.Crews, func(a, b CrewRow) int { return strings.Compare(a.Name, b.Name) })

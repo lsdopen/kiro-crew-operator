@@ -19,6 +19,7 @@ templ Layout(p Page) {
 					@navLink("/requests", "Requests")
 					if p.Role == "admin" {
 						@navLink("/accounts", "Accounts")
+						@navLink("/config", "Config")
 					}
 				</nav>
 				<span class="muted">{ p.Email } ({ p.Role })</span>
@@ -44,6 +45,8 @@ templ Content(p Page) {
 			@Requests(p)
 		case "accounts":
 			@Accounts(p)
+		case "config":
+			@Config(p)
 		default:
 			@Crews(p)
 	}
@@ -188,7 +191,7 @@ templ requestForm(p Page) {
 		<label>Size
 			<select name="size">
 				for _, s := range p.Sizes {
-					<option value={ s } selected?={ s == "light" }>{ s }</option>
+					<option value={ s } selected?={ s == p.DefaultSize }>{ s }</option>
 				}
 			</select>
 		</label>
@@ -205,6 +208,11 @@ templ requestForm(p Page) {
 
 templ Accounts(p Page) {
 	<h2>Accounts</h2>
+	<div id="flash" role="status">
+		if p.Notice != "" {
+			<p>{ p.Notice }</p>
+		}
+	</div>
 	<table>
 		<thead>
 			<tr>
@@ -212,6 +220,7 @@ templ Accounts(p Page) {
 				<th>Name</th>
 				<th>Role</th>
 				<th>Manager</th>
+				<th></th>
 			</tr>
 		</thead>
 		<tbody>
@@ -219,10 +228,55 @@ templ Accounts(p Page) {
 				<tr>
 					<td>{ a.Email }</td>
 					<td>{ a.DisplayName }</td>
-					<td>{ a.Role }</td>
-					<td>{ a.Manager }</td>
+					<td>
+						<select name="role" form={ "acct-" + a.Name } aria-label={ "Role of " + a.Email }>
+							for _, r := range []string{"user", "manager", "admin"} {
+								<option value={ r } selected?={ r == a.Role }>{ r }</option>
+							}
+						</select>
+					</td>
+					<td><input name="manager" form={ "acct-" + a.Name } value={ a.Manager } maxlength="254" aria-label={ "Manager of " + a.Email }/></td>
+					<td>
+						<form id={ "acct-" + a.Name } class="inline" method="post" action={ templ.SafeURL("/accounts/" + a.Name) } hx-post={ "/accounts/" + a.Name } hx-target="#content">
+							<input type="hidden" name="csrf_token" value={ p.CSRF }/>
+							<button type="submit">Save</button>
+						</form>
+						<form class="inline" method="post" action={ templ.SafeURL("/accounts/" + a.Name + "/delete") } hx-post={ "/accounts/" + a.Name + "/delete" } hx-target="#content" hx-confirm={ "Delete " + a.Email + "?" }>
+							<input type="hidden" name="csrf_token" value={ p.CSRF }/>
+							<button type="submit">Delete</button>
+						</form>
+					</td>
 				</tr>
 			}
 		</tbody>
 	</table>
+}
+
+templ Config(p Page) {
+	<h2>Config</h2>
+	<div id="flash" role="status">
+		if p.Notice != "" {
+			<p>{ p.Notice }</p>
+		}
+	</div>
+	<form class="stack" method="post" action="/config" hx-post="/config" hx-target="#content">
+		<input type="hidden" name="csrf_token" value={ p.CSRF }/>
+		<fieldset>
+			<legend>Allowed sizes</legend>
+			for _, c := range p.Config.Allowed {
+				<label><input type="checkbox" name="allowed" value={ c.Name } checked?={ c.Allowed }/> { c.Name }</label>
+			}
+		</fieldset>
+		<label>Default size
+			<select name="default_size">
+				for _, c := range p.Config.Allowed {
+					<option value={ c.Name } selected?={ c.Name == p.Config.DefaultSize }>{ c.Name }</option>
+				}
+			</select>
+		</label>
+		<label>Gateway image (blank for the built-in) <input name="gateway_image" value={ p.Config.GatewayImage } maxlength="512"/></label>
+		<label>Tailscale image (blank for the built-in) <input name="tailscale_image" value={ p.Config.TailscaleImage } maxlength="512"/></label>
+		<label>MCP config ConfigMap (blank for none) <input name="mcp_config_ref" value={ p.Config.MCPConfigRef } maxlength="253"/></label>
+		<button type="submit">Save</button>
+	</form>
 }

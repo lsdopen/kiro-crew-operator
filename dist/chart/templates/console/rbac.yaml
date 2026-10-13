@@ -1,13 +1,15 @@
 {{- if .Values.console.enabled }}
 {{- $ns := .Values.console.crewNamespace }}
-# Least privilege. Accounts are cluster-scoped, so the ClusterRole carries only
-# them (read, plus create for self sign-up). Crews get patch (Start and Stop; the
-# code patches only suspend and startedAt). Requests also get create (new
+# Least privilege. Accounts and the KiroCrewConfig are cluster-scoped, so the
+# ClusterRole carries only them: accounts read, create (self sign-up), update,
+# patch and delete (admin edits), config read plus update and patch on `default`
+# alone. Crews get patch (Start and Stop; the code patches only suspend and
+# startedAt). Requests also get create (new
 # request), patch (decision) and delete (cancel). With broker.enabled the console
 # also gets pods get/list and pods/exec create, narrowed to one command by vap.yaml.
 # Pod access comes from the namespaced Role only; the broker requires crewNamespace.
 # The rest is granted in console.crewNamespace alone when it is set. Nothing else:
-# no Secrets, no pods/log, no update.
+# no Secrets, no pods/log.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -17,7 +19,14 @@ metadata:
 rules:
 - apiGroups: ["kirocrew.lsdopen.io"]
   resources: ["kirocrewaccounts"]
-  verbs: ["get", "list", "watch", "create"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["kirocrew.lsdopen.io"]
+  resources: ["kirocrewconfigs"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["kirocrew.lsdopen.io"]
+  resources: ["kirocrewconfigs"]
+  resourceNames: ["default"]
+  verbs: ["update", "patch"]
 {{- if not $ns }}
 # crewNamespace is empty: the console watches crews and requests in every namespace.
 - apiGroups: ["kirocrew.lsdopen.io"]

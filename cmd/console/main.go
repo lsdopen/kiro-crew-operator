@@ -130,6 +130,7 @@ func main() {
 	// Start the informers now so missing RBAC or CRDs fail at boot, not on first use.
 	for _, obj := range []client.Object{
 		&kirocrewv1alpha1.KiroCrew{}, &kirocrewv1alpha1.KiroCrewRequest{}, &kirocrewv1alpha1.KiroCrewAccount{},
+		&kirocrewv1alpha1.KiroCrewConfig{},
 	} {
 		if _, err := cl.GetCache().GetInformer(ctx, obj); err != nil {
 			fatal(err, "Could not start informer")

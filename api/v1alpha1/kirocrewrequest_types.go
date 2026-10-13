@@ -72,6 +72,7 @@ const (
 	ReasonUnknownRequester     = "UnknownRequester"
 	ReasonUnauthorisedApprover = "UnauthorisedApprover"
 	ReasonCrewNameTaken        = "CrewNameTaken"
+	ReasonSizeNotAllowed       = "SizeNotAllowed"
 )
 
 // KiroCrewRequestStatus defines the observed state of KiroCrewRequest.

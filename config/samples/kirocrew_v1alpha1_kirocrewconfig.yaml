@@ -1,0 +1,10 @@
+apiVersion: kirocrew.lsdopen.io/v1alpha1
+kind: KiroCrewConfig
+metadata:
+  labels:
+    app.kubernetes.io/name: kiro-crew-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: default
+spec:
+  allowedSizes: [mini, light, development, power]
+  defaultSize: light

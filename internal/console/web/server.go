@@ -65,6 +65,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /crews", s.authed(s.page("crews")))
 	mux.HandleFunc("GET /requests", s.authed(s.page("requests")))
 	mux.HandleFunc("GET /accounts", s.authed(s.page("accounts")))
+	mux.HandleFunc("GET /config", s.authed(s.page("config")))
+	mux.HandleFunc("POST /accounts/{name}", s.authed(s.updateAccount))
+	mux.HandleFunc("POST /accounts/{name}/delete", s.authed(s.deleteAccount))
+	mux.HandleFunc("POST /config", s.authed(s.updateConfig))
 	mux.HandleFunc("POST /crews/{name}/start", s.authed(s.startCrew))
 	mux.HandleFunc("POST /crews/{name}/stop", s.authed(s.stopCrew))
 	mux.HandleFunc("POST /crews/{name}/open", s.authed(s.openCrew))
@@ -248,7 +252,7 @@ func (s *Server) csrfOK(r *http.Request, sess *auth.Session) bool {
 
 func (s *Server) page(active string) authedHandler {
 	return func(w http.ResponseWriter, r *http.Request, sess *auth.Session, acct *v1alpha1.KiroCrewAccount) {
-		if active == "accounts" && acct.Spec.Role != v1alpha1.RoleAdmin {
+		if (active == "accounts" || active == "config") && acct.Spec.Role != v1alpha1.RoleAdmin {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
