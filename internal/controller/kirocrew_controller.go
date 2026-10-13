@@ -80,8 +80,8 @@ const (
 	// runtimes, and the MCP ecosystem is distributed almost entirely as uvx and
 	// npx commands — so on the stock image a crew's MCP servers cannot start.
 	// Override spec.gateway.image to run upstream's image directly instead.
-	defaultGatewayImage   = "ghcr.io/lsdopen/kiro-crew-gateway:latest"
-	defaultTailscaleImage = "ghcr.io/tailscale/tailscale:stable"
+	defaultGatewayImage   = "ghcr.io/lsdopen/kiro-crew-gateway:kirocrew-0.8.0"
+	defaultTailscaleImage = "ghcr.io/tailscale/tailscale:v1.102.5"
 
 	// gatewayHealthPath is upstream's health endpoint, used by its own
 	// HEALTHCHECK. It is not /healthz.
