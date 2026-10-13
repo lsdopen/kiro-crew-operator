@@ -1,6 +1,9 @@
 version: "2"
 run:
   allow-parallel-runners: true
+  # Lint the dev-only hack/console-preview harness too.
+  build-tags:
+    - preview
 linters:
   default: none
   enable:

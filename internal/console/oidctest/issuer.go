@@ -31,6 +31,7 @@ type Issuer struct {
 	// URL is the issuer identifier.
 	URL    string
 	server *httptest.Server
+	mux    *http.ServeMux
 	key    *rsa.PrivateKey
 	signer jose.Signer
 	// Forge makes the token endpoint sign with a key the JWKS does not publish.
@@ -57,10 +58,14 @@ func New() (*Issuer, error) {
 	mux.HandleFunc("/.well-known/openid-configuration", i.discovery)
 	mux.HandleFunc("/keys", i.keys)
 	mux.HandleFunc("/token", i.token)
+	i.mux = mux
 	i.server = httptest.NewServer(mux)
 	i.URL = i.server.URL
 	return i, nil
 }
+
+// Handle adds a route, such as an /authorize page the tests do not need.
+func (i *Issuer) Handle(pattern string, h http.HandlerFunc) { i.mux.HandleFunc(pattern, h) }
 
 // Close stops the issuer.
 func (i *Issuer) Close() { i.server.Close() }
