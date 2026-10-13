@@ -3,7 +3,7 @@ module github.com/lsdopen/kiro-crew-operator
 go 1.26.9
 
 require (
-	github.com/onsi/ginkgo/v2 v2.33.0
+	github.com/onsi/ginkgo/v2 v2.33.1
 	github.com/onsi/gomega v1.44.0
 	github.com/robfig/cron/v3 v3.0.1
 	k8s.io/api v0.37.1
