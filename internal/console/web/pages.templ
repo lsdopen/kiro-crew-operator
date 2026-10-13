@@ -147,8 +147,8 @@ templ crewEdit(p Page, c CrewRow) {
 			<input type="hidden" name="csrf_token" value={ p.CSRF }/>
 			<label>Size (now { c.Size })
 				<select name="size">
-					for _, s := range p.Sizes {
-						<option value={ s } selected?={ s == c.Size }>{ s }</option>
+					for _, o := range resizeOptions(p, c.Size) {
+						<option value={ o.Name } selected?={ o.Name == c.Size } disabled?={ o.Disabled }>{ o.Label }</option>
 					}
 				</select>
 			</label>
@@ -255,8 +255,8 @@ templ requestForm(p Page) {
 		<input type="hidden" name="csrf_token" value={ p.CSRF }/>
 		<label>Size
 			<select name="size">
-				for _, s := range p.Sizes {
-					<option value={ s } selected?={ s == p.DefaultSize }>{ s }</option>
+				for _, o := range p.Sizes {
+					<option value={ o.Name } selected?={ o.Name == p.DefaultSize }>{ o.Label }</option>
 				}
 			</select>
 		</label>
@@ -329,13 +329,13 @@ templ Config(p Page) {
 		<fieldset>
 			<legend>Allowed sizes</legend>
 			for _, c := range p.Config.Allowed {
-				<label><input type="checkbox" name="allowed" value={ c.Name } checked?={ c.Allowed }/> { c.Name }</label>
+				<label><input type="checkbox" name="allowed" value={ c.Name } checked?={ c.Allowed }/> { c.Name } — { c.Spec }</label>
 			}
 		</fieldset>
 		<label>Default size
 			<select name="default_size">
 				for _, c := range p.Config.Allowed {
-					<option value={ c.Name } selected?={ c.Name == p.Config.DefaultSize }>{ c.Name }</option>
+					<option value={ c.Name } selected?={ c.Name == p.Config.DefaultSize }>{ c.Name } — { c.Spec }</option>
 				}
 			</select>
 		</label>

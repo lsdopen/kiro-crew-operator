@@ -284,3 +284,50 @@ func TestConfigEditorKeepsTheMCPAllowlist(t *testing.T) {
 		t.Fatalf("bad name status = %d", w.Code)
 	}
 }
+
+func TestResizeSelectShowsCurrentSizeEvenWhenNotAllowed(t *testing.T) {
+	tests := []struct {
+		name    string
+		allowed []v1alpha1.Size
+		extra   []string
+		absent  []string
+	}{
+		{"current size not in allowedSizes", []v1alpha1.Size{v1alpha1.SizeLight, v1alpha1.SizePower}, []string{`<option value="light">light — 1 CPU · 16Gi RAM · 40Gi disk</option>`}, []string{`value="development"`}},
+		{"current size allowed", nil, []string{`<option value="development">development — 2 CPU · 32Gi RAM · 60Gi disk</option>`}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			crew := aliceCrew()
+			crew.Spec.Size = v1alpha1.SizeMini
+			cfg := configObj(v1alpha1.KiroCrewConfigSpec{AllowedSizes: tt.allowed, DefaultSize: v1alpha1.SizeLight})
+			if tt.allowed == nil {
+				cfg = configObj(v1alpha1.KiroCrewConfigSpec{})
+			}
+			e := newEnv(t, []string{testDomain}, append(people(acct(mgr2, v1alpha1.RoleManager, "")), crew, cfg)...)
+			body := e.get(alice, crewsPath).Body.String()
+			cur := `<option value="mini" selected disabled>mini — 0.5 CPU · 8Gi RAM · 20Gi disk (current)</option>`
+			for _, want := range append(tt.extra, cur) {
+				if !strings.Contains(body, want) {
+					t.Fatalf("missing %q in %s", want, body)
+				}
+			}
+			for _, no := range tt.absent {
+				if strings.Contains(body, no) {
+					t.Fatalf("unexpected %q", no)
+				}
+			}
+		})
+	}
+}
+
+func TestSizePickersShowSpecs(t *testing.T) {
+	e := newEnv(t, []string{testDomain}, editPeople()...)
+	for _, path := range []string{crewsPath, "/requests"} {
+		if body := e.get(alice, path).Body.String(); !strings.Contains(body, "light — 1 CPU · 16Gi RAM · 40Gi disk") {
+			t.Fatalf("%s lacks size specs: %s", path, body)
+		}
+	}
+	if body := e.get(root, pathConfig).Body.String(); !strings.Contains(body, "power — 4 CPU · 64Gi RAM · 80Gi disk") {
+		t.Fatalf("config lacks size specs: %s", body)
+	}
+}
