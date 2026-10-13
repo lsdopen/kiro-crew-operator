@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"io/fs"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -35,13 +36,23 @@ type Server struct {
 	Sealer         *auth.Sealer
 	Store          *authz.Store
 	AllowedDomains []string
+	// TrustedProxies are the peers whose X-Forwarded-For is believed. Empty means
+	// the remote address is the client.
+	TrustedProxies []netip.Prefix
 	Log            logr.Logger
+
+	authLimit, writeLimit *limiter
 }
+
+// maxFormBytes caps a posted form.
+const maxFormBytes = 16 << 10
 
 type authedHandler func(w http.ResponseWriter, r *http.Request, sess *auth.Session, acct *v1alpha1.KiroCrewAccount)
 
 // Handler is the full console, with security headers and Origin checks applied.
 func (s *Server) Handler() http.Handler {
+	s.authLimit = newLimiter(authBurst, authEvery)
+	s.writeLimit = newLimiter(writeBurst, writeEvery)
 	static, _ := fs.Sub(staticFS, "static")
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
@@ -56,10 +67,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /crews", s.authed(s.page("crews")))
 	mux.HandleFunc("GET /requests", s.authed(s.page("requests")))
 	mux.HandleFunc("GET /accounts", s.authed(s.page("accounts")))
+	mux.HandleFunc("POST /requests", s.authed(s.createRequest))
+	mux.HandleFunc("POST /requests/{name}/decision", s.authed(s.decideRequest))
+	mux.HandleFunc("POST /requests/{name}/cancel", s.authed(s.cancelRequest))
 
 	// CrossOriginProtection rejects cross-origin unsafe requests by Origin and
 	// Sec-Fetch-Site, in addition to the CSRF token.
-	return securityHeaders(http.NewCrossOriginProtection().Handler(mux))
+	return securityHeaders(s.limitAuth(http.NewCrossOriginProtection().Handler(mux)))
 }
 
 func securityHeaders(next http.Handler) http.Handler {
@@ -183,9 +197,18 @@ func (s *Server) authed(next authedHandler) http.HandlerFunc {
 			s.denyUnauthenticated(w, r, true)
 			return
 		}
-		if !safeMethod(r.Method) && !s.csrfOK(r, sess) {
-			http.Error(w, "invalid CSRF token", http.StatusForbidden)
-			return
+		if !safeMethod(r.Method) {
+			r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+			_ = r.ParseForm()
+			if !s.csrfOK(r, sess) {
+				s.fail(w, r, http.StatusForbidden, "invalid CSRF token")
+				return
+			}
+			if !s.writeLimit.allow(sess.SID) {
+				w.Header().Set("Retry-After", retryAfterS)
+				s.fail(w, r, http.StatusTooManyRequests, "too many requests, slow down")
+				return
+			}
 		}
 		if s.Sealer.Now().Sub(sess.Seen) > refreshAfter {
 			sess.Seen = s.Sealer.Now()
@@ -201,7 +224,7 @@ func (s *Server) denyUnauthenticated(w http.ResponseWriter, r *http.Request, cle
 	if clear {
 		http.SetCookie(w, auth.ClearCookie(auth.SessionCookie))
 	}
-	if r.Header.Get("HX-Request") == "true" {
+	if isHTMX(r) {
 		w.Header().Set("HX-Redirect", "/auth/login")
 		w.WriteHeader(http.StatusUnauthorized)
 		return
@@ -228,24 +251,49 @@ func (s *Server) page(active string) authedHandler {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		view, err := s.Store.Visible(r.Context(), acct)
-		if err != nil {
-			s.Log.Error(err, "listing resources")
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		p := newPage(view, s.Sealer.CSRFToken(sess.SID), active)
-		w.Header().Set("Vary", "HX-Request")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		c := Layout(p)
-		if r.Header.Get("HX-Request") == "true" {
-			c = Content(p)
-		}
-		if err := c.Render(r.Context(), w); err != nil {
-			s.Log.Error(err, "rendering page")
-		}
+		s.render(w, r, sess, acct, active, "")
 	}
 }
+
+// render writes a page, or its content fragment for htmx. notice is shown on it.
+func (s *Server) render(w http.ResponseWriter, r *http.Request, sess *auth.Session, acct *v1alpha1.KiroCrewAccount, active, notice string) {
+	view, err := s.Store.Visible(r.Context(), acct)
+	if err != nil {
+		s.Log.Error(err, "listing resources")
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	p := newPage(view, s.Sealer.CSRFToken(sess.SID), active)
+	p.Notice = notice
+	w.Header().Set("Vary", "HX-Request")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	c := Layout(p)
+	if isHTMX(r) {
+		c = Content(p)
+	}
+	if err := c.Render(r.Context(), w); err != nil {
+		s.Log.Error(err, "rendering page")
+	}
+}
+
+// fail answers an error. htmx gets the message swapped into #flash, since it does
+// not swap error responses into the page by default.
+func (s *Server) fail(w http.ResponseWriter, r *http.Request, status int, msg string) {
+	if !isHTMX(r) {
+		http.Error(w, msg, status)
+		return
+	}
+	h := w.Header()
+	h.Set("HX-Retarget", "#flash")
+	h.Set("HX-Reswap", "innerHTML")
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	if err := Flash(msg).Render(r.Context(), w); err != nil {
+		s.Log.Error(err, "rendering message")
+	}
+}
+
+func isHTMX(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
 
 func safeMethod(m string) bool {
 	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
@@ -42,12 +43,13 @@ func init() {
 type config struct {
 	addr, provider, issuerURL, redirectURL, secretDir, crewNamespace string
 	allowedDomains                                                   []string
+	trustedProxies                                                   []netip.Prefix
 	allowEmptyDomains                                                bool
 }
 
 func parseFlags() config {
 	var c config
-	var domains string
+	var domains, proxies string
 	flag.StringVar(&c.addr, "bind-address", ":8080", "Address the HTTP server listens on.")
 	flag.StringVar(&c.provider, "auth-provider", "google", "OIDC provider. Only google is implemented.")
 	flag.StringVar(&c.issuerURL, "auth-issuer-url", "https://accounts.google.com", "OIDC issuer URL.")
@@ -58,12 +60,33 @@ func parseFlags() config {
 	flag.StringVar(&c.secretDir, "auth-secret-dir", "/etc/console/auth",
 		"Directory holding the client-id, client-secret and cookie-key files.")
 	flag.StringVar(&c.crewNamespace, "crew-namespace", "", "Namespace holding KiroCrews and requests. Empty means all.")
+	flag.StringVar(&proxies, "trusted-proxies", "",
+		"Comma-separated CIDRs whose X-Forwarded-For is trusted. Empty uses the remote address.")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	c.allowedDomains = auth.NormalizeDomains(strings.Split(domains, ","))
+	var err error
+	if c.trustedProxies, err = parseCIDRs(proxies); err != nil {
+		fatal(err, "Invalid --trusted-proxies")
+	}
 	return c
+}
+
+func parseCIDRs(list string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for f := range strings.SplitSeq(list, ",") {
+		if f = strings.TrimSpace(f); f == "" {
+			continue
+		}
+		p, err := netip.ParsePrefix(f)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p.Masked())
+	}
+	return out, nil
 }
 
 func (c config) validate() error {
@@ -137,6 +160,7 @@ func main() {
 			Client: cl.GetClient(), Live: cl.GetAPIReader(), CrewNamespace: cfg.crewNamespace,
 		},
 		AllowedDomains: cfg.allowedDomains,
+		TrustedProxies: cfg.trustedProxies,
 		Log:            ctrl.Log.WithName("console"),
 	}
 	httpSrv := &http.Server{

@@ -107,7 +107,7 @@ MUST hold only crew pods, because `pods/exec` below is namespace-wide.
 | Role (crewNamespace) | `kirocrews` | get, list, watch | 3a |
 | Role (crewNamespace) | `kirocrews` | patch (only `suspend`/`startedAt`; code-enforced) | 3c |
 | Role (crewNamespace) | `kirocrewrequests` | get, list, watch | 3a |
-| Role (crewNamespace) | `kirocrewrequests` | create, patch | 3b |
+| Role (crewNamespace) | `kirocrewrequests` | create, patch, delete (delete is "cancel my Pending request") | 3b |
 | Role (crewNamespace) | `pods` | get | 3c |
 | Role (crewNamespace) | `pods/exec` | create (+ get for the WebSocket upgrade on API servers that authorize it as get) | 3c |
 
@@ -340,6 +340,6 @@ the authentication step regardless.
 | Phase | Delivers | RBAC added | Exit test |
 |---|---|---|---|
 | **3a** login + read-only | OIDC login, sessions, CSRF scaffold, account resolution with first-login sign-up (role `user`, no manager), read-only views of own crew / requests (user), reports' (manager), all (admin); crew card with `dashboardURL` link and owner-only `tailnetLoginURL`; image, chart, ingress, release step; `KiroCrewConfig` CRD (read-only) | accounts create + read, configs/crews/requests read | envtest + httptest: empty-domain refusal, wrong `hd`, missing `email_verified`, first login creates a `user` account with no manager, role views |
-| **3b** requests + approvals | Request form (`allowedSizes`, defaults), approve/deny with `decision.by` from session (no admission policy, Decision 4); request controller honours `allowedSizes` | requests create, patch | posted `by=`/`requester=` ignored; non-manager approval → 403; a no-manager user's request is approvable only by an admin |
+| **3b** requests + approvals | Request form (sizes, optional schedule), cancel own Pending request, approve/deny with `decision.by` from session (no admission policy, Decision 4); per-IP and per-session rate limits; opt-in NetworkPolicy. `allowedSizes`/`defaultSize` wait for the `KiroCrewConfig` editor in 3d | requests create, patch, delete | posted `by=`/`requester=` ignored; non-manager approval → 403; a no-manager user's request is approvable only by an admin |
 | **3c** start/stop + sign-in | `startedAt` field + `computeDesired`/`inUpWindow` change: latest of last Up, last Down, `startedAt` wins, requeue includes next Down after `startedAt` (Decision 1); start/stop; broker with exec VAP; re-verify gateway facts on the pinned image | crews patch, pods get, pods/exec | the token never appears in logs (captured logger); the VAP denies `sh`; non-owner `/open` → 403; a redirect host outside `tailnet.domain` → refused |
 | **3d** admin config | Accounts CRUD (last-admin guard), `KiroCrewConfig` editor; crew controller reads images and MCP ref from config | accounts write, config `default` write | demote-last-admin refused; config change rolls gateway image on the next reconcile |

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"testing"
@@ -33,9 +34,16 @@ type env struct {
 	k8s     client.Client
 	sealer  *auth.Sealer
 	domains []string
+	// sessions caches one session per email, for tests that need a stable sid.
+	sessions map[string]*auth.Session
 }
 
 func newEnv(t *testing.T, domains []string, objs ...client.Object) *env {
+	t.Helper()
+	return newEnvProxies(t, domains, nil, objs...)
+}
+
+func newEnvProxies(t *testing.T, domains []string, proxies []netip.Prefix, objs ...client.Object) *env {
 	t.Helper()
 	s := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(s); err != nil {
@@ -59,7 +67,7 @@ func newEnv(t *testing.T, domains []string, objs ...client.Object) *env {
 		t.Fatal(err)
 	}
 	srv := &Server{
-		Provider: provider, Sealer: sealer, AllowedDomains: domains, Log: logr.Discard(),
+		Provider: provider, Sealer: sealer, AllowedDomains: domains, TrustedProxies: proxies, Log: logr.Discard(),
 		Store: &authz.Store{Client: k8s, Live: k8s, CrewNamespace: ns},
 	}
 	return &env{t: t, h: srv.Handler(), iss: iss, k8s: k8s, sealer: sealer, domains: domains}
@@ -247,7 +255,7 @@ func TestLoginAuthURL(t *testing.T) {
 func TestLoginReturnIsSameSiteOnly(t *testing.T) {
 	e := newEnv(t, []string{testDomain})
 	tests := []struct{ name, query, want string }{
-		{"plain path", "/requests", "/requests"},
+		{"plain path", pathRequests, pathRequests},
 		{"path with query", "/crews%3Fa%3D1", "/crews?a=1"},
 		{"protocol-relative", "//evil.org", crewsPath},
 		{"encoded tab", "/%09/evil.com", crewsPath},
@@ -315,7 +323,7 @@ func TestLogoutRequiresCSRF(t *testing.T) {
 	if w := e.do(http.MethodPost, "/auth/logout", ck, nil, ""); w.Code != http.StatusForbidden {
 		t.Errorf("no token = %d", w.Code)
 	}
-	if w := e.do(http.MethodPost, "/auth/logout", ck, map[string]string{csrfHeader: "bad"}, ""); w.Code != http.StatusForbidden {
+	if w := e.do(http.MethodPost, "/auth/logout", ck, map[string]string{csrfHeader: badToken}, ""); w.Code != http.StatusForbidden {
 		t.Errorf("bad token = %d", w.Code)
 	}
 	other := e.sealer.CSRFToken("another-session")
@@ -340,7 +348,7 @@ func crewWith(name, owner, dashboard, loginURL string) *v1alpha1.KiroCrew {
 	return &v1alpha1.KiroCrew{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 		Spec: v1alpha1.KiroCrewSpec{Owner: owner, Schedule: &v1alpha1.ScheduleSpec{
-			Up: "0 8 * * 1-5", Down: "0 18 * * 1-5", Timezone: "UTC"}},
+			Up: cronUp, Down: cronDown, Timezone: "UTC"}},
 		Status: v1alpha1.KiroCrewStatus{DashboardURL: dashboard, TailnetLoginURL: loginURL},
 	}
 }
