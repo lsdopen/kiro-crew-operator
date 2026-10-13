@@ -2,8 +2,8 @@ apiVersion: v2
 name: kiro-crew-operator
 description: A Helm chart to distribute kiro-crew-operator
 type: application
-version: 0.2.8
-appVersion: 0.2.8
+version: 0.2.9
+appVersion: 0.2.9
 keywords:
   - kubernetes
   - operator
