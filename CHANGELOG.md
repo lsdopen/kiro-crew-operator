@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.7](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.6...v0.2.7) (2026-10-13)
+
+
+### Features
+
+* console phase 3c (start/stop and sign-in brokering) ([#63](https://github.com/lsdopen/kiro-crew-operator/issues/63)) ([969a6ad](https://github.com/lsdopen/kiro-crew-operator/commit/969a6ad279bc2ccb644db309ac0e0d2b47acda9d))
+
 ## [0.2.6](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.5...v0.2.6) (2026-10-13)
 
 
