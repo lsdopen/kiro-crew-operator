@@ -322,7 +322,7 @@ func TestUnauthenticated(t *testing.T) {
 	if w.Code != http.StatusFound || !strings.HasPrefix(w.Header().Get("Location"), "/auth/login") {
 		t.Errorf("page = %d %s", w.Code, w.Header().Get("Location"))
 	}
-	w = e.do(http.MethodGet, "/crews", nil, map[string]string{"HX-Request": htmxOn}, "")
+	w = e.do(http.MethodGet, "/crews", nil, map[string]string{hdrHX: htmxOn}, "")
 	if w.Code != http.StatusUnauthorized || w.Header().Get("HX-Redirect") != "/auth/login" {
 		t.Errorf("htmx = %d %s", w.Code, w.Header().Get("HX-Redirect"))
 	}
@@ -463,7 +463,7 @@ func TestHTMXGetsFragmentAndHeaders(t *testing.T) {
 	e := newEnv(t, []string{testDomain}, acct("alice@example.com", v1alpha1.RoleUser, ""))
 	c, sess := e.sessionFor("alice@example.com")
 	full := e.do(http.MethodGet, "/crews", []*http.Cookie{c}, nil, "")
-	frag := e.do(http.MethodGet, "/crews", []*http.Cookie{c}, map[string]string{"HX-Request": htmxOn}, "")
+	frag := e.do(http.MethodGet, "/crews", []*http.Cookie{c}, map[string]string{hdrHX: htmxOn}, "")
 	if !strings.Contains(full.Body.String(), "<html") || strings.Contains(frag.Body.String(), "<html") {
 		t.Error("full page / fragment split is wrong")
 	}

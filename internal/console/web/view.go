@@ -95,7 +95,7 @@ type SizeChoice struct {
 // SizeOption is one size picker entry; Label carries the tier's specs.
 type SizeOption struct {
 	Name, Label string
-	// Disabled keeps the crew's current size from being posted as a resize target.
+	// Disabled marks a current size the config no longer allows.
 	Disabled bool
 }
 
@@ -218,14 +218,14 @@ func sizeLabel(name string) string {
 }
 
 // resizeOptions lists the allowed sizes plus the crew's current one, which is
-// always shown, selected-by-name and disabled so it is never a resize target.
+// always shown and labelled; it is disabled only when the config no longer allows it.
 func resizeOptions(p Page, current string) []SizeOption {
 	var out []SizeOption
 	for _, name := range sizeNames() {
 		inList := slices.ContainsFunc(p.Sizes, func(o SizeOption) bool { return o.Name == name })
 		switch {
 		case name == current:
-			out = append(out, SizeOption{Name: name, Label: sizeLabel(name) + " (current)", Disabled: true})
+			out = append(out, SizeOption{Name: name, Label: sizeLabel(name) + " (current)", Disabled: !inList})
 		case inList:
 			out = append(out, SizeOption{Name: name, Label: sizeLabel(name)})
 		}

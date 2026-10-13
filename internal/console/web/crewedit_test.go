@@ -22,6 +22,7 @@ const (
 	keyReason    = "reason"
 	keyRequester = "requester"
 	crewAliceKey = "alice"
+	hdrHX        = "HX-Request"
 )
 
 func editPeople(extra ...client.Object) []client.Object {
@@ -285,35 +286,40 @@ func TestConfigEditorKeepsTheMCPAllowlist(t *testing.T) {
 	}
 }
 
-func TestResizeSelectShowsCurrentSizeEvenWhenNotAllowed(t *testing.T) {
+func TestResizeSelectKeepsCurrentSize(t *testing.T) {
+	all := []v1alpha1.Size{v1alpha1.SizeMini, v1alpha1.SizeLight, v1alpha1.SizeDevelopment, v1alpha1.SizePower}
+	const mini = "mini — 0.5 CPU · 8Gi RAM · 20Gi disk (current)"
 	tests := []struct {
 		name    string
 		allowed []v1alpha1.Size
-		extra   []string
+		cur     string
 		absent  []string
 	}{
-		{"current size not in allowedSizes", []v1alpha1.Size{v1alpha1.SizeLight, v1alpha1.SizePower}, []string{`<option value="light">light — 1 CPU · 16Gi RAM · 40Gi disk</option>`}, []string{`value="development"`}},
-		{"current size allowed", nil, []string{`<option value="development">development — 2 CPU · 32Gi RAM · 60Gi disk</option>`}, nil},
+		{"current size allowed", all, `<option value="mini" selected>` + mini + `</option>`, nil},
+		{"current size not allowed", []v1alpha1.Size{v1alpha1.SizeLight, v1alpha1.SizePower}, `<option value="mini" selected disabled>` + mini + `</option>`, []string{`value="development"`}},
 	}
+	hx := []string{hdrHX, htmxOn}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			crew := aliceCrew()
 			crew.Spec.Size = v1alpha1.SizeMini
 			cfg := configObj(v1alpha1.KiroCrewConfigSpec{AllowedSizes: tt.allowed, DefaultSize: v1alpha1.SizeLight})
-			if tt.allowed == nil {
-				cfg = configObj(v1alpha1.KiroCrewConfigSpec{})
-			}
 			e := newEnv(t, []string{testDomain}, append(people(acct(mgr2, v1alpha1.RoleManager, "")), crew, cfg)...)
-			body := e.get(alice, crewsPath).Body.String()
-			cur := `<option value="mini" selected disabled>mini — 0.5 CPU · 8Gi RAM · 20Gi disk (current)</option>`
-			for _, want := range append(tt.extra, cur) {
-				if !strings.Contains(body, want) {
-					t.Fatalf("missing %q in %s", want, body)
-				}
+			// The page and every htmx partial that re-renders the crew row.
+			bodies := map[string]string{
+				"page":     e.get(alice, crewsPath).Body.String(),
+				"start":    e.post(alice, "/crews/alice/start", url.Values{}, hx...).Body.String(),
+				"stop":     e.post(alice, "/crews/alice/stop", url.Values{}, hx...).Body.String(),
+				"schedule": e.post(alice, pathSchedule, scheduleForm(), hx...).Body.String(),
 			}
-			for _, no := range tt.absent {
-				if strings.Contains(body, no) {
-					t.Fatalf("unexpected %q", no)
+			for from, body := range bodies {
+				if !strings.Contains(body, `<select name="size" autocomplete="off">`) || !strings.Contains(body, tt.cur) {
+					t.Fatalf("%s: missing %q in %s", from, tt.cur, body)
+				}
+				for _, no := range tt.absent {
+					if strings.Contains(body, no) {
+						t.Fatalf("%s: unexpected %q", from, no)
+					}
 				}
 			}
 		})

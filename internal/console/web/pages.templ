@@ -146,7 +146,7 @@ templ crewEdit(p Page, c CrewRow) {
 		<form class="stack" method="post" action={ templ.SafeURL("/crews/" + c.Name + "/resize") } hx-post={ "/crews/" + c.Name + "/resize" } hx-target="#content">
 			<input type="hidden" name="csrf_token" value={ p.CSRF }/>
 			<label>Size (now { c.Size })
-				<select name="size">
+				<select name="size" autocomplete="off">
 					for _, o := range resizeOptions(p, c.Size) {
 						<option value={ o.Name } selected?={ o.Name == c.Size } disabled?={ o.Disabled }>{ o.Label }</option>
 					}
