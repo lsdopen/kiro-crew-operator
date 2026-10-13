@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -12,6 +13,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
 	"k8s.io/client-go/kubernetes"
@@ -199,9 +201,14 @@ func main() {
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		if err := controller.EnsureConfig(ctx, mgr.GetClient()); err != nil {
-			setupLog.Error(err, "Could not create the default KiroCrewConfig")
-		}
+		// Retry until created or shutdown, so a transient API error neither crash-loops nor skips it.
+		_ = wait.PollUntilContextCancel(ctx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+			if err := controller.EnsureConfig(ctx, mgr.GetClient()); err != nil {
+				setupLog.Error(err, "Could not create the default KiroCrewConfig, retrying")
+				return false, nil
+			}
+			return true, nil
+		})
 		return nil
 	})); err != nil {
 		setupLog.Error(err, "Failed to add config bootstrap")

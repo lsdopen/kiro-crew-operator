@@ -132,4 +132,40 @@ var _ = Describe("KiroCrewConfig", func() {
 		Expect(k8sClient.Update(ctx, cfg)).To(Succeed())
 		Expect(phase()).To(Equal(kirocrewv1alpha1.PhasePending))
 	})
+
+	It("keeps a Denied request Denied after allowedSizes narrows", func() {
+		for name, role := range map[string]kirocrewv1alpha1.Role{"cfg-alice": kirocrewv1alpha1.RoleUser, "cfg-root": kirocrewv1alpha1.RoleAdmin} {
+			email := reqRequester
+			if role == kirocrewv1alpha1.RoleAdmin {
+				email = reqAdmin
+			}
+			Expect(k8sClient.Create(ctx, &kirocrewv1alpha1.KiroCrewAccount{
+				ObjectMeta: metav1.ObjectMeta{Name: name},
+				Spec:       kirocrewv1alpha1.KiroCrewAccountSpec{Email: email, Role: role},
+			})).To(Succeed())
+		}
+		cfg := newConfig(kirocrewv1alpha1.KiroCrewConfigSpec{})
+		req := &kirocrewv1alpha1.KiroCrewRequest{
+			ObjectMeta: metav1.ObjectMeta{Name: "cfg-denied", Namespace: ns},
+			Spec: kirocrewv1alpha1.KiroCrewRequestSpec{
+				Requester: reqRequester, Size: kirocrewv1alpha1.SizePower,
+				Decision: &kirocrewv1alpha1.Decision{Verdict: kirocrewv1alpha1.VerdictDenied, By: reqAdmin},
+			},
+		}
+		Expect(k8sClient.Create(ctx, req)).To(Succeed())
+		r := &KiroCrewRequestReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		phase := func() kirocrewv1alpha1.RequestPhase {
+			GinkgoHelper()
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(req)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(req), req)).To(Succeed())
+			return req.Status.Phase
+		}
+
+		Expect(phase()).To(Equal(kirocrewv1alpha1.PhaseDenied))
+		cfg.Spec.AllowedSizes = []kirocrewv1alpha1.Size{kirocrewv1alpha1.SizeMini}
+		cfg.Spec.DefaultSize = kirocrewv1alpha1.SizeMini
+		Expect(k8sClient.Update(ctx, cfg)).To(Succeed())
+		Expect(phase()).To(Equal(kirocrewv1alpha1.PhaseDenied))
+	})
 })

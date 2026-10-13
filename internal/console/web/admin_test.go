@@ -123,7 +123,7 @@ func TestLastAdminCannotBeDemotedOrDeleted(t *testing.T) {
 	if w := e.post(root, accountOf(root), url.Values{keyRole: {valUser}}); w.Code != http.StatusConflict {
 		t.Fatalf("demote: status = %d", w.Code)
 	}
-	if w := e.post(root, accountOf(root)+"/delete", nil); w.Code != http.StatusConflict {
+	if w := e.post(root, accountOf(root)+"/delete", nil); w.Code != http.StatusBadRequest {
 		t.Fatalf("delete: status = %d", w.Code)
 	}
 	if got := e.account(root).Spec.Role; got != v1alpha1.RoleAdmin {
@@ -142,8 +142,8 @@ func TestAdminCanLeaveWhileAnotherAdminRemains(t *testing.T) {
 		t.Fatalf("demote: status = %d", w.Code)
 	}
 	// root is now a user: the last admin is second.
-	if w := e.post(second, accountOf(second)+"/delete", nil); w.Code != http.StatusConflict {
-		t.Fatalf("delete last: status = %d", w.Code)
+	if w := e.post(second, accountOf(second)+"/delete", nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("delete self: status = %d", w.Code)
 	}
 	if w := e.post(second, accountOf(bob)+"/delete", nil); w.Code != http.StatusSeeOther {
 		t.Fatalf("delete bob: status = %d", w.Code)
@@ -153,6 +153,15 @@ func TestAdminCanLeaveWhileAnotherAdminRemains(t *testing.T) {
 	}
 	if w := e.post(second, accountOf(bob)+"/delete", nil); w.Code != http.StatusNotFound {
 		t.Fatalf("delete again: status = %d", w.Code)
+	}
+}
+
+func TestDemotedAdminIsNotRenderedAsAdmin(t *testing.T) {
+	second := "second@example.com"
+	e := newEnv(t, []string{testDomain}, people(acct(second, v1alpha1.RoleAdmin, ""))...)
+	w := e.post(root, accountOf(root), url.Values{keyRole: {valUser}}, "HX-Request", "true")
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), accountOf(bob)+"/delete") {
+		t.Fatalf("status = %d, admin view rendered: %s", w.Code, w.Body.String())
 	}
 }
 

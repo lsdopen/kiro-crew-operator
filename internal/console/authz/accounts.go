@@ -87,6 +87,9 @@ func (s *Store) DeleteAccount(ctx context.Context, me *v1alpha1.KiroCrewAccount,
 	if me.Spec.Role != v1alpha1.RoleAdmin {
 		return ErrForbidden
 	}
+	if name == me.Name {
+		return &InvalidError{"cannot delete your own account"}
+	}
 	s.adminMu.Lock()
 	defer s.adminMu.Unlock()
 	a, err := s.liveAccount(ctx, name)

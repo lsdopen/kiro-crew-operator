@@ -3,6 +3,8 @@ package web
 import (
 	"net/http"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	v1alpha1 "github.com/lsdopen/kiro-crew-operator/api/v1alpha1"
 	"github.com/lsdopen/kiro-crew-operator/internal/console/auth"
 	"github.com/lsdopen/kiro-crew-operator/internal/console/authz"
@@ -15,7 +17,20 @@ func (s *Server) updateAccount(w http.ResponseWriter, r *http.Request, sess *aut
 		s.writeFailed(w, r, err)
 		return
 	}
-	s.done(w, r, sess, acct, "accounts", "Account updated.")
+	active := tabAccounts
+	if r.PathValue("name") == acct.Name {
+		// Render from the fresh account: an admin who demoted themselves must not see admin views.
+		fresh := &v1alpha1.KiroCrewAccount{}
+		if err := s.Store.Live.Get(r.Context(), client.ObjectKey{Name: acct.Name}, fresh); err != nil {
+			s.writeFailed(w, r, err)
+			return
+		}
+		acct = fresh
+		if acct.Spec.Role != v1alpha1.RoleAdmin {
+			active = "crews"
+		}
+	}
+	s.done(w, r, sess, acct, active, "Account updated.")
 }
 
 func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, sess *auth.Session, acct *v1alpha1.KiroCrewAccount) {
@@ -23,7 +38,7 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, sess *aut
 		s.writeFailed(w, r, err)
 		return
 	}
-	s.done(w, r, sess, acct, "accounts", "Account deleted.")
+	s.done(w, r, sess, acct, tabAccounts, "Account deleted.")
 }
 
 func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, sess *auth.Session, acct *v1alpha1.KiroCrewAccount) {

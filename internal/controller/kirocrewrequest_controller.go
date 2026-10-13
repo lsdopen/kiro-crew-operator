@@ -80,7 +80,9 @@ func (r *KiroCrewRequestReconciler) evaluate(ctx context.Context, request *kiroc
 	if err != nil {
 		return err
 	}
-	if allowed, _ := cfg.Sizes(); !slices.Contains(allowed, request.Spec.Size) {
+	// A denial provisions nothing, so a later change to allowedSizes must not invalidate it.
+	denied := request.Spec.Decision != nil && request.Spec.Decision.Verdict == kirocrewv1alpha1.VerdictDenied
+	if allowed, _ := cfg.Sizes(); !denied && !slices.Contains(allowed, request.Spec.Size) {
 		setInvalid(request, kirocrewv1alpha1.ReasonSizeNotAllowed,
 			fmt.Sprintf("Size %s is not in KiroCrewConfig allowedSizes", request.Spec.Size))
 		return nil
