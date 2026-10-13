@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.8](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.7...v0.2.8) (2026-10-13)
+
+
+### Features
+
+* console phase 3d (admin accounts and KiroCrewConfig) ([#68](https://github.com/lsdopen/kiro-crew-operator/issues/68)) ([51b0011](https://github.com/lsdopen/kiro-crew-operator/commit/51b00118d867a3195e5a38cecba046b527635453))
+
+
+### Dependencies
+
+* bump library/golang from 1.26.9 to 1.27.1 in /images/console ([#62](https://github.com/lsdopen/kiro-crew-operator/issues/62)) ([e0395cc](https://github.com/lsdopen/kiro-crew-operator/commit/e0395cc208c481accec01c4f2138cc6f23acb063))
+
 ## [0.2.7](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.6...v0.2.7) (2026-10-13)
 
 
