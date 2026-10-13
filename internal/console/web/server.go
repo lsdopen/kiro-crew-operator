@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"io/fs"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -36,12 +35,9 @@ type Server struct {
 	Sealer         *auth.Sealer
 	Store          *authz.Store
 	AllowedDomains []string
-	// TrustedProxies are the peers whose X-Forwarded-For is believed. Empty means
-	// the remote address is the client.
-	TrustedProxies []netip.Prefix
 	Log            logr.Logger
 
-	authLimit, writeLimit *limiter
+	writeLimit *limiter
 }
 
 // maxFormBytes caps a posted form.
@@ -51,7 +47,6 @@ type authedHandler func(w http.ResponseWriter, r *http.Request, sess *auth.Sessi
 
 // Handler is the full console, with security headers and Origin checks applied.
 func (s *Server) Handler() http.Handler {
-	s.authLimit = newLimiter(authBurst, authEvery)
 	s.writeLimit = newLimiter(writeBurst, writeEvery)
 	static, _ := fs.Sub(staticFS, "static")
 	mux := http.NewServeMux()
@@ -73,7 +68,7 @@ func (s *Server) Handler() http.Handler {
 
 	// CrossOriginProtection rejects cross-origin unsafe requests by Origin and
 	// Sec-Fetch-Site, in addition to the CSRF token.
-	return securityHeaders(s.limitAuth(http.NewCrossOriginProtection().Handler(mux)))
+	return securityHeaders(http.NewCrossOriginProtection().Handler(mux))
 }
 
 func securityHeaders(next http.Handler) http.Handler {

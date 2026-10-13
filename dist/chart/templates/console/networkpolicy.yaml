@@ -1,6 +1,6 @@
 {{- if and .Values.console.enabled .Values.console.networkPolicy.enabled }}
 {{- $np := .Values.console.networkPolicy }}
-# Ingress only from the ingress controller (and console.trustedProxies). Egress only
+# Ingress only from console.networkPolicy.ingressFrom. Egress only
 # to DNS, the API server and HTTPS, which the OIDC issuer needs: its addresses are
 # not stable, so port 443 is open to any address.
 apiVersion: networking.k8s.io/v1
@@ -19,13 +19,7 @@ spec:
   - Egress
   ingress:
   - from:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: {{ required "console.networkPolicy.ingressNamespace is required" $np.ingressNamespace }}
-    {{- range .Values.console.trustedProxies }}
-    - ipBlock:
-        cidr: {{ . }}
-    {{- end }}
+    {{- toYaml (required "console.networkPolicy.ingressFrom is required" $np.ingressFrom) | nindent 4 }}
     ports:
     - port: http
       protocol: TCP

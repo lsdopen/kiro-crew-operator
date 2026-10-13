@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"net/url"
 	"strings"
 	"testing"
@@ -40,11 +39,6 @@ type env struct {
 
 func newEnv(t *testing.T, domains []string, objs ...client.Object) *env {
 	t.Helper()
-	return newEnvProxies(t, domains, nil, objs...)
-}
-
-func newEnvProxies(t *testing.T, domains []string, proxies []netip.Prefix, objs ...client.Object) *env {
-	t.Helper()
 	s := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(s); err != nil {
 		t.Fatal(err)
@@ -67,7 +61,7 @@ func newEnvProxies(t *testing.T, domains []string, proxies []netip.Prefix, objs 
 		t.Fatal(err)
 	}
 	srv := &Server{
-		Provider: provider, Sealer: sealer, AllowedDomains: domains, TrustedProxies: proxies, Log: logr.Discard(),
+		Provider: provider, Sealer: sealer, AllowedDomains: domains, Log: logr.Discard(),
 		Store: &authz.Store{Client: k8s, Live: k8s, CrewNamespace: ns},
 	}
 	return &env{t: t, h: srv.Handler(), iss: iss, k8s: k8s, sealer: sealer, domains: domains}

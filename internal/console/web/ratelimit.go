@@ -1,11 +1,6 @@
 package web
 
 import (
-	"net"
-	"net/http"
-	"net/netip"
-	"slices"
-	"strings"
 	"sync"
 	"time"
 )
@@ -15,8 +10,6 @@ const maxLimiterKeys = 100_000
 
 // Limits are per replica: with N replicas the effective limit is up to N times higher.
 const (
-	authBurst   = 30
-	authEvery   = 2 * time.Second // per client IP, on /auth/*
 	writeBurst  = 20
 	writeEvery  = 3 * time.Second // per session, on writes
 	sweepEvery  = time.Minute
@@ -75,55 +68,4 @@ func (l *limiter) sweep(now time.Time) {
 			delete(l.buckets, k)
 		}
 	}
-}
-
-// clientIP is the peer address, or, when the peer is a trusted proxy, the
-// right-most X-Forwarded-For entry that is not itself a trusted proxy. Entries to
-// the left of that are client-supplied and ignored.
-func clientIP(r *http.Request, trusted []netip.Prefix) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	peer, err := netip.ParseAddr(host)
-	if err != nil {
-		return host
-	}
-	peer = peer.Unmap()
-	if !inPrefixes(peer, trusted) {
-		return peer.String()
-	}
-	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
-	for _, hop := range slices.Backward(hops) {
-		ip, err := netip.ParseAddr(strings.TrimSpace(hop))
-		if err != nil {
-			return peer.String()
-		}
-		ip = ip.Unmap()
-		if !inPrefixes(ip, trusted) {
-			return ip.String()
-		}
-	}
-	return peer.String()
-}
-
-func inPrefixes(ip netip.Addr, prefixes []netip.Prefix) bool {
-	for _, p := range prefixes {
-		if p.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
-
-// limitAuth rate limits /auth/* per client IP.
-func (s *Server) limitAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/auth/") && !s.authLimit.allow(clientIP(r, s.TrustedProxies)) {
-			w.Header().Set("Retry-After", retryAfterS)
-			http.Error(w, "too many requests", http.StatusTooManyRequests)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }

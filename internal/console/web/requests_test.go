@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"net/url"
 	"strings"
 	"testing"
@@ -28,16 +27,12 @@ const (
 	sizeLight        = "light"
 	nope             = "nope"
 	rAlice           = "r-alice"
-	xff              = "X-Forwarded-For"
-	proxyPeer        = "10.1.1.1"
-	proxyPeerAddr    = "10.1.1.1:80"
 	pathRequests     = "/requests"
 	badToken         = "bad"
 	keyDown          = "down"
 	keyZone          = "timezone"
 	keySize          = "size"
 	keyVerdict       = "verdict"
-	clientAddr       = "203.0.113.5"
 )
 
 func people(extra ...client.Object) []client.Object {
@@ -403,23 +398,6 @@ func TestRequestButtonsFollowRole(t *testing.T) {
 	}
 }
 
-func TestAuthRateLimitTrips(t *testing.T) {
-	e := newEnv(t, []string{testDomain})
-	var last int
-	for range authBurst + 5 {
-		last = e.do(http.MethodGet, "/auth/login", nil, nil, "").Code
-	}
-	if last != http.StatusTooManyRequests {
-		t.Fatalf("status after burst = %d, want 429", last)
-	}
-	if w := e.do(http.MethodGet, "/auth/login", nil, nil, ""); w.Header().Get("Retry-After") == "" {
-		t.Error("no Retry-After")
-	}
-	if w := e.do(http.MethodGet, "/healthz", nil, nil, ""); w.Code != http.StatusOK {
-		t.Errorf("non-auth path limited: %d", w.Code)
-	}
-}
-
 func TestWriteRateLimitIsPerSession(t *testing.T) {
 	e := newEnv(t, []string{testDomain}, people(pendingReq("r1", alice))...)
 	bad := url.Values{keyVerdict: {nope}}
@@ -433,62 +411,6 @@ func TestWriteRateLimitIsPerSession(t *testing.T) {
 	// Another session is unaffected.
 	if w := e.post(mgr, "/requests/r1/decision", url.Values{keyVerdict: {approved}}); w.Code != http.StatusSeeOther {
 		t.Fatalf("other session: status = %d", w.Code)
-	}
-}
-
-func TestForwardedForIgnoredFromUntrustedPeer(t *testing.T) {
-	// No trusted proxies: rotating X-Forwarded-For must not dodge the limit.
-	e := newEnv(t, []string{testDomain})
-	var last int
-	for i := range authBurst + 5 {
-		last = e.do(http.MethodGet, "/auth/login", nil, map[string]string{xff: "203.0.113." + string(rune('1'+i%9))}, "").Code
-	}
-	if last != http.StatusTooManyRequests {
-		t.Fatalf("spoofed XFF evaded the limit: %d", last)
-	}
-}
-
-func TestForwardedForHonouredFromTrustedProxy(t *testing.T) {
-	// httptest peers are 192.0.2.1.
-	e := newEnvProxies(t, []string{testDomain}, []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")})
-	for range authBurst + 5 {
-		e.do(http.MethodGet, "/auth/login", nil, map[string]string{xff: "203.0.113.7"}, "")
-	}
-	if w := e.do(http.MethodGet, "/auth/login", nil, map[string]string{xff: "203.0.113.7"}, ""); w.Code != http.StatusTooManyRequests {
-		t.Errorf("abusive client not limited: %d", w.Code)
-	}
-	if w := e.do(http.MethodGet, "/auth/login", nil, map[string]string{xff: "203.0.113.8"}, ""); w.Code != http.StatusFound {
-		t.Errorf("a different client was limited too: %d", w.Code)
-	}
-}
-
-func TestClientIP(t *testing.T) {
-	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
-	tests := []struct {
-		name, remote, xff, want string
-		trusted                 []netip.Prefix
-	}{
-		{"no proxies uses peer", "198.51.100.9:1234", "1.2.3.4", "198.51.100.9", nil},
-		{"untrusted peer ignores XFF", "198.51.100.9:1234", "1.2.3.4", "198.51.100.9", trusted},
-		{"trusted peer takes XFF", proxyPeerAddr, clientAddr, clientAddr, trusted},
-		{"spoofed left entries ignored", proxyPeerAddr, "6.6.6.6, 203.0.113.5", clientAddr, trusted},
-		{"chain of trusted proxies", proxyPeerAddr, "203.0.113.5, 10.2.2.2", clientAddr, trusted},
-		{"all trusted falls back to peer", proxyPeerAddr, "10.2.2.2", proxyPeer, trusted},
-		{"garbage falls back to peer", proxyPeerAddr, "not-an-ip", proxyPeer, trusted},
-		{"trusted peer without XFF", proxyPeerAddr, "", proxyPeer, trusted},
-		{"ipv4-mapped peer", "[::ffff:10.1.1.1]:80", clientAddr, clientAddr, trusted},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r, _ := http.NewRequest(http.MethodGet, "/", nil)
-			r.RemoteAddr = tt.remote
-			if tt.xff != "" {
-				r.Header.Set(xff, tt.xff)
-			}
-			if got := clientIP(r, tt.trusted); got != tt.want {
-				t.Fatalf("clientIP = %q, want %q", got, tt.want)
-			}
-		})
 	}
 }
 
