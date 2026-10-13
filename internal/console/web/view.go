@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"fmt"
 	"net/url"
 	"slices"
@@ -67,6 +68,8 @@ type RequestRow struct {
 	Phase     string
 	DecidedBy string
 	CrewRef   string
+	Resize    bool
+	FiledBy   string
 	Reason    string
 	// CanDecide and CanCancel gate the row's buttons; the server checks again on post.
 	CanDecide bool
@@ -167,7 +170,8 @@ func requestRow(q *v1alpha1.KiroCrewRequest) RequestRow {
 	}
 	return RequestRow{
 		Name: q.Name, Requester: q.Spec.Requester, Size: string(q.Spec.Size), Phase: phase,
-		DecidedBy: q.Status.DecidedBy, CrewRef: q.Status.CrewRef, Reason: q.Spec.Reason,
+		DecidedBy: q.Status.DecidedBy, Reason: q.Spec.Reason,
+		CrewRef: cmp.Or(q.Status.CrewRef, q.Spec.CrewRef), Resize: q.Spec.CrewRef != "", FiledBy: q.Annotations[authz.AnnotationFiledBy],
 	}
 }
 

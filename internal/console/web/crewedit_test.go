@@ -142,6 +142,25 @@ func TestResizeByTheOwnersManagerOrAnAdminIsApprovedByThem(t *testing.T) {
 	}
 }
 
+func TestPendingResizeRowShowsCrewAndWhoFiled(t *testing.T) {
+	e := newEnv(t, []string{testDomain}, editPeople()...)
+	if w := e.post(mgr, pathResize, url.Values{keySize: {sizeLight}}); w.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d", w.Code)
+	}
+	body := e.get(alice, "/requests").Body.String()
+	if !strings.Contains(body, "resize of "+crewAliceKey) || !strings.Contains(body, "filed by "+mgr) {
+		t.Fatalf("request row lacks the crew or filer: %s", body)
+	}
+	q := &v1alpha1.KiroCrewRequest{Spec: v1alpha1.KiroCrewRequestSpec{CrewRef: "spec-crew"}}
+	if r := requestRow(q); r.CrewRef != "spec-crew" || !r.Resize {
+		t.Fatalf("row = %+v", r)
+	}
+	q.Status.CrewRef = "status-crew"
+	if r := requestRow(q); r.CrewRef != "status-crew" {
+		t.Fatalf("row = %+v", r)
+	}
+}
+
 func TestResizeRefusals(t *testing.T) {
 	disk := resource.MustParse("100Gi")
 	pinned := aliceCrew()

@@ -74,6 +74,9 @@ func TestRequestResizeWho(t *testing.T) {
 			if sp.Requester != tt.requests || sp.CrewRef != crewAlice || sp.Size != v1alpha1.SizePower || sp.Schedule != nil || sp.Reason != "more" {
 				t.Fatalf("spec = %+v", sp)
 			}
+			if filedBy := q.Annotations[AnnotationFiledBy]; tt.decided != (filedBy == tt.me.Spec.Email) || !tt.decided && filedBy != "" {
+				t.Fatalf("filed-by = %q", filedBy)
+			}
 			if tt.decided != (sp.Decision != nil) || tt.decided && (sp.Decision.By != tt.me.Spec.Email || sp.Decision.Verdict != v1alpha1.VerdictApproved) {
 				t.Fatalf("decision = %+v", sp.Decision)
 			}

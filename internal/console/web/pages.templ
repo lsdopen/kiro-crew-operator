@@ -213,7 +213,16 @@ templ Requests(p Page) {
 						<td>{ q.Size }</td>
 						<td>{ q.Phase }</td>
 						<td>{ q.DecidedBy }</td>
-						<td>{ q.CrewRef }</td>
+						<td>
+							if q.Resize {
+								resize of { q.CrewRef }
+							} else {
+								{ q.CrewRef }
+							}
+							if q.FiledBy != "" {
+								<br/><small>filed by { q.FiledBy }</small>
+							}
+						</td>
 						<td>{ q.Reason }</td>
 						<td>
 							if q.CanDecide {

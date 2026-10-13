@@ -119,7 +119,7 @@ spec:
             - message: a resize request cannot carry a schedule
               rule: '!has(self.crewRef) || !has(self.schedule)'
             - message: requester, size, schedule and crewRef are immutable; only decision
-                may change
+                and reason may change
               rule: self.requester == oldSelf.requester && self.size == oldSelf.size
                 && has(self.schedule) == has(oldSelf.schedule) && (!has(self.schedule)
                 || self.schedule == oldSelf.schedule) && has(self.crewRef) == has(oldSelf.crewRef)

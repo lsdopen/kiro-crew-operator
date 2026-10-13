@@ -366,10 +366,11 @@ spec stays set at provisioning or by an admin through the Kubernetes API.
 The request flow fits with one field. `KiroCrewRequestSpec.crewRef` (optional)
 turns a request into a resize of an existing crew instead of a new one:
 
-- The console sets `crewRef := crewName(me)` and `size`, never `schedule` (CEL: `!has(self.crewRef) || !has(self.schedule)`).
+- The console sets `crewRef` to the crew being resized and `size`, never `schedule` (CEL: `!has(self.crewRef) || !has(self.schedule)`). The owner files for their own crew and it stays `Pending`, including for an admin resizing their own crew.
+- A manager or admin filing for a report's crew sets `requester` to the crew's owner and `decision.by` to the filer, and annotates the request `kirocrew.lsdopen.io/filed-by: <filer email>` so the record shows who asked.
 - Approval is unchanged: `decision`, `canDecide`, `decision.by` from the session.
 - On approval the request controller gets the crew. It marks the request `Invalid` with `CrewNotFound` if the crew is missing, or `NotOwner` if `crew.spec.owner` is not the requester. A size outside `allowedSizes` is `Invalid` as today. Otherwise it patches `crew.spec.size`, sets `status.crewRef`, and moves to a new terminal phase, `Applied`. `requestsForAccount` treats `Applied` as terminal like `Provisioned`.
-- `spec.requester`, `size`, `schedule` and `crewRef` get a CEL transition rule `self == oldSelf`. This is CRD schema validation, not the deferred admission policy (Decision 4): it stops an approved request's size being swapped, while `spec.decision` stays writable.
+- One spec-level CEL transition rule makes `requester`, `size`, `schedule` and `crewRef` immutable. This is CRD schema validation, not the deferred admission policy (Decision 4): it stops an approved request's size being swapped, while `decision` and `reason` stay writable.
 - If `spec.gateway.resources` or `spec.storage.size` is set, it still wins over the tier (`resolveSize`). The console shows "Resources pinned by an admin" and disables the resize.
 
 ### Enforcement
@@ -387,7 +388,7 @@ same two layers as 3b and 3c:
 
 | Change | Running pod | Disk (PVC) |
 |---|---|---|
-| Schedule | Pod template unchanged. The crew controller recomputes desired state (latest event wins, Decision 1), so the edit may start or stop the crew at once. The console runs the same `computeDesired` to preview this ("Saving will stop your crew now"). | Untouched |
+| Schedule | Pod template unchanged. The crew controller recomputes desired state (latest event wins, Decision 1), so the edit may start or stop the crew at once. The form warns "Saving can start or stop the crew at once"; there is no per-save preview. | Untouched |
 | Size, crew running | New resources in the pod template, so the StatefulSet replaces the pod: a short outage, and in-flight sessions end. The pod may stay `Pending` if no node fits; the crew card shows it. | Kept. The crew controller patches the data PVC to the new tier's storage when larger (`volumeClaimTemplates` are immutable, so the template keeps its original size). Never shrunk. If the StorageClass does not allow expansion, CPU and memory still change and the crew reports `StorageResized=False`. |
 | Size, crew stopped | Applied at the next start | As above |
 | MCP config ref | The volume source changes, so the pod is replaced | Untouched |

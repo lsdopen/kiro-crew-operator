@@ -41,7 +41,7 @@ type Decision struct {
 
 // KiroCrewRequestSpec is a person's ask for a crew, or with crewRef for a resize of theirs.
 // +kubebuilder:validation:XValidation:rule="!has(self.crewRef) || !has(self.schedule)",message="a resize request cannot carry a schedule"
-// +kubebuilder:validation:XValidation:rule="self.requester == oldSelf.requester && self.size == oldSelf.size && has(self.schedule) == has(oldSelf.schedule) && (!has(self.schedule) || self.schedule == oldSelf.schedule) && has(self.crewRef) == has(oldSelf.crewRef) && (!has(self.crewRef) || self.crewRef == oldSelf.crewRef)",message="requester, size, schedule and crewRef are immutable; only decision may change"
+// +kubebuilder:validation:XValidation:rule="self.requester == oldSelf.requester && self.size == oldSelf.size && has(self.schedule) == has(oldSelf.schedule) && (!has(self.schedule) || self.schedule == oldSelf.schedule) && has(self.crewRef) == has(oldSelf.crewRef) && (!has(self.crewRef) || self.crewRef == oldSelf.crewRef)",message="requester, size, schedule and crewRef are immutable; only decision and reason may change"
 type KiroCrewRequestSpec struct {
 	// Requester is the email of the person the crew is for. It must match a KiroCrewAccount.
 	// +required

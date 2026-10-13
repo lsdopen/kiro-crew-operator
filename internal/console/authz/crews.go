@@ -21,6 +21,9 @@ import (
 )
 
 // ErrCrewNotFound means the crew does not exist.
+// AnnotationFiledBy records who filed a resize on behalf of the crew owner.
+const AnnotationFiledBy = "kirocrew.lsdopen.io/filed-by"
+
 var ErrCrewNotFound = errors.New("crew not found")
 
 // IsOwner is true when me owns the crew.
@@ -219,6 +222,7 @@ func (s *Store) RequestResize(ctx context.Context, me *v1alpha1.KiroCrewAccount,
 		},
 	}
 	if !IsOwner(me, crew) && CanDecide(me, owner) {
+		q.Annotations = map[string]string{AnnotationFiledBy: me.Spec.Email}
 		q.Spec.Decision = &v1alpha1.Decision{Verdict: v1alpha1.VerdictApproved, By: me.Spec.Email}
 	}
 	if err := s.Client.Create(ctx, q); err != nil {
