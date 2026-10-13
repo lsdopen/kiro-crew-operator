@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.3](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.2...v0.2.3) (2026-10-13)
+
+
+### Bug Fixes
+
+* make a provisioned crew reachable end to end ([#42](https://github.com/lsdopen/kiro-crew-operator/issues/42)) ([049c74d](https://github.com/lsdopen/kiro-crew-operator/commit/049c74d03d1dfdb7f377c884dbf8b47bbf8a3b4b))
+
+
+### Dependencies
+
+* bump astral-sh/uv from `1946145` to `cdc6093` in /images/gateway ([#34](https://github.com/lsdopen/kiro-crew-operator/issues/34)) ([24f2acd](https://github.com/lsdopen/kiro-crew-operator/commit/24f2acdb984830b2aec28a89d7abd8c529d131bb))
+* pin uv and node to precise version tags, not rolling ([#46](https://github.com/lsdopen/kiro-crew-operator/issues/46)) ([d73ae0a](https://github.com/lsdopen/kiro-crew-operator/commit/d73ae0a8fc3b8aa2b7f65431a02a781e7e2a96b2))
+
 ## [0.2.2](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.1...v0.2.2) (2026-10-06)
 
 
