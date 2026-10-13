@@ -6,7 +6,9 @@ lands with this document.
 
 ## Decisions
 
-All rulings are in. Everything else in this document is decided.
+Rulings 1–6 are in. Rulings 7–11 are open and cover phase 3e only
+(see [Editing a running crew](#editing-a-running-crew-3e)). Everything else
+in this document is decided.
 
 | # | Question | Ruling | Status |
 |---|---|---|---|
@@ -16,6 +18,11 @@ All rulings are in. Everything else in this document is decided.
 | 4 | Who may write `spec.decision` outside the console? | No ValidatingAdmissionPolicy and no break-glass group for now. Cluster admins can approve through the Kubernetes API. Residual risk: anyone with update or patch on `kirocrewrequests` can forge `decision.by`, so chart RBAC grants that only to the console ServiceAccount, and the controller's `canDecide` check stays defence in depth. Future option: a ValidatingAdmissionPolicy that allows `spec.decision` changes only from the console ServiceAccount plus a configurable break-glass group. | Deferred |
 | 5 | Should the chart docs recommend a private ingress, with public as the opt-in? | Yes, in the docs, not in the chart defaults. The docs lead with the private example and present public as an opt-in. The chart stays exposure-neutral (`ingress.enabled: false`, empty `className` and `annotations`). SSO stays the only *authentication* step either way, and the threat model assumes neither a private network nor an allowlist. | Accepted |
 | 6 | Can users request on someone else's behalf? | No. `spec.requester` is always the session email. | Accepted |
+| 7 | Who may change a running crew's schedule, and does it need approval? | Recommend: owner, owner's manager and admin, applied directly with no request. Same set as Start/Stop. | Open |
+| 8 | How is a size change approved? | Recommend: reuse `KiroCrewRequest` with a new `spec.crewRef` naming the crew. Same approvers as `canDecide`. A manager or admin resizing a report's crew files and approves in one action, so every resize leaves a request with `decision.by`. | Open |
+| 9 | May a crew be downsized, and what happens to its disk? | Recommend: yes for CPU and memory. The PVC never shrinks (Kubernetes cannot shrink one); it grows to the new tier's storage when that is larger. | Open |
+| 10 | When does an approved resize take effect on a running crew? | Recommend: immediately, which restarts the pod. The request form warns the owner. A stopped crew picks it up on its next start. | Open |
+| 11 | Who may change a crew's MCP config, and to what? | Recommend: admin only, choosing from a `KiroCrewConfig.spec.mcpConfigs` allowlist of ConfigMap names. Clearing it falls back to `KiroCrewConfig.spec.mcpConfigRef`. The console gets no ConfigMap access. | Open |
 
 Flagged on the decisions already made:
 
@@ -31,7 +38,8 @@ Flagged on the decisions already made:
 |---|---|
 | Google OIDC login for configured Workspace domains | Other OIDC providers (the shape allows them, see [OAuth](#oauth-and-sessions)) |
 | Role-gated views: user, manager, admin | Reaching a crew without the tailnet |
-| Requests, approvals, start/stop, one-click dashboard sign-in | Editing a running crew's size or MCP config |
+| Requests, approvals, start/stop, one-click dashboard sign-in | Editing a running crew's owner, storage class, AWS role or images |
+| Editing a running crew's size, schedule and MCP config (3e) | Shrinking a crew's disk |
 | Admin: accounts, global config | Kiro login or tailnet auth on the user's behalf. Both stay human steps (`docs/tailnet.md`) |
 
 ## Architecture
@@ -42,7 +50,7 @@ browser ──https──> Ingress, private or public (class, TLS, annotations: 
                      ▼
             kiro-crew-console (Deployment, 2 replicas, no sidecar)
               │ informers: KiroCrewAccount, KiroCrewRequest, KiroCrew, KiroCrewConfig
-              │ writes: requests (create, decision), crews (suspend/startedAt), accounts, config
+              │ writes: requests (create, decision), crews (suspend/startedAt/schedule/mcpConfigRef), accounts, config
               │ exec: kirocrew token  (3c only)
               ▼
             kube-apiserver ──> operator reconciles as today
@@ -84,6 +92,10 @@ approve" and the request waits for an admin. Admins can edit roles and managers.
 | Start / stop crew | own | own + reports | all | owner, or owner's `account.manager == me`, or admin. Start sets `suspend=false` and `startedAt=now`; Stop sets `suspend=true` (Decision 1). |
 | Open dashboard (sign-in) | own | own | own | `crew.spec.owner == me` **only**. Managers and admins cannot broker into someone else's crew. |
 | See `status.tailnetLoginURL` | own | own | own | as above. It is a one-time node-auth URL. |
+| Change schedule (3e) | own | own + reports | all | as Start / stop; applied directly (Decision 7) |
+| Request a resize (3e) | own | own | own | `crew.spec.owner == me`, no open request; creates a `KiroCrewRequest` with `crewRef` (Decision 8) |
+| Resize a report's crew (3e) | – | reports | all | creates the resize request with `decision.by := me` in one action |
+| Change MCP config (3e) | – | – | ✓ | value ∈ `KiroCrewConfig.spec.mcpConfigs` or empty (Decision 11) |
 | Accounts CRUD (roles, managers) | – | – | ✓ | cannot delete self or demote the last admin |
 | Global config | – | – | ✓ | |
 
@@ -106,6 +118,7 @@ MUST hold only crew pods, because `pods/exec` below is namespace-wide.
 | ClusterRole | `kirocrewconfigs` (resourceNames: `default`) | update, patch | 3d |
 | Role (crewNamespace) | `kirocrews` | get, list, watch | 3a |
 | Role (crewNamespace) | `kirocrews` | patch (only `suspend`/`startedAt`; code-enforced) | 3c |
+| Role (crewNamespace) | `kirocrews` | patch, same verb: the code-enforced field set widens to `schedule` and `mcpConfigRef`, never `size` | 3e |
 | Role (crewNamespace) | `kirocrewrequests` | get, list, watch | 3a |
 | Role (crewNamespace) | `kirocrewrequests` | create, patch, delete (delete is "cancel my Pending request") | 3b |
 | Role (crewNamespace) | `pods` | get, list (live reads, no watch) | 3c, `console.broker.enabled` |
@@ -236,6 +249,7 @@ Two homes, split by plane and blast radius:
 | `gateway.image` | string | operator's compiled `defaultGatewayImage` | crew controller, live (lets admins roll the fleet) |
 | `tailscale.image` | string | compiled `defaultTailscaleImage` | crew controller, live |
 | `mcpConfigRef` | string | "" | crew controller, when `KiroCrew.spec.mcpConfigRef` is empty |
+| `mcpConfigs` | `[]string` | [] | console MCP picker (3e); ConfigMap names in crewNamespace |
 | `signIn.sessionTTL` | `metav1.Duration` | 8h, max 20h | broker's `--ttl` |
 
 Precedence: `KiroCrew.spec` > `KiroCrewConfig` > compiled default. Size and
@@ -329,11 +343,64 @@ the authentication step regardless.
 | CSRF (approve, start, open) | Synchronizer token + `CrossOriginProtection`; SameSite=Lax; all state changes are POST |
 | Privilege escalation by form tampering | `requester` and `decision.by` come from the session; role is re-read from the CR per request. Residual risk (Decision 4, no admission policy for now): anyone with update or patch on `kirocrewrequests` can forge `decision.by`, so chart RBAC grants that only to the console SA, cluster admins can approve through the Kubernetes API, and the controller's `canDecide` stays defence in depth. |
 | Manager approves a non-report | Code check plus the operator's `canDecide` (marks the request `Invalid`). A user with no manager has no manager-approver; only admins can approve. |
+| Owner grants their own crew more resources | `size` is written only by the request controller after an approved request; the console's crew patch never carries it; request spec is immutable after creation |
 | Sign-in token leak | Only in one `Location` header to the verified owner; never logged or stored; 5 min, single-use, and redeemable only via the owner's tailnet identity |
 | Console compromise | VAP limits exec to `kirocrew token`; no Secrets access; crews stay tailnet-gated, so a minted link is useless to an attacker who is not the owner |
 | Brute force / DoS on the console's Ingress, private or public | Per-session limits on writes and `/open`, per-IP limits on `/auth/*` at the ingress or gateway, 2 stateless replicas |
 | Ingress header spoofing | The app trusts no forwarded headers |
 | SSO is the single factor | Accepted (Decision 5). Workspace-level MFA is the layer above it; a private ingress is recommended in the docs and an ingress allowlist is optional. |
+
+## Editing a running crew (3e)
+
+Three fields of a running `KiroCrew` become editable. Everything else in its
+spec stays set at provisioning or by an admin through the Kubernetes API.
+
+| Field | Who | Path | Decision |
+|---|---|---|---|
+| `spec.schedule` | owner, owner's manager, admin | Console patches the crew directly | 7 |
+| `spec.size` | owner asks; manager of the owner or admin approves | `KiroCrewRequest` with `spec.crewRef`; the request controller patches the crew | 8 |
+| `spec.mcpConfigRef` | admin | Console patches the crew directly, from the `mcpConfigs` allowlist | 11 |
+
+### Resize through the request flow
+
+The request flow fits with one field. `KiroCrewRequestSpec.crewRef` (optional)
+turns a request into a resize of an existing crew instead of a new one:
+
+- The console sets `crewRef := crewName(me)` and `size`, never `schedule` (CEL: `!has(self.crewRef) || !has(self.schedule)`).
+- Approval is unchanged: `decision`, `canDecide`, `decision.by` from the session.
+- On approval the request controller gets the crew. It marks the request `Invalid` with `CrewNotFound` if the crew is missing, or `NotOwner` if `crew.spec.owner` is not the requester. A size outside `allowedSizes` is `Invalid` as today. Otherwise it patches `crew.spec.size`, sets `status.crewRef`, and moves to a new terminal phase, `Applied`. `requestsForAccount` treats `Applied` as terminal like `Provisioned`.
+- `spec.requester`, `size`, `schedule` and `crewRef` get a CEL transition rule `self == oldSelf`. This is CRD schema validation, not the deferred admission policy (Decision 4): it stops an approved request's size being swapped, while `spec.decision` stays writable.
+- If `spec.gateway.resources` or `spec.storage.size` is set, it still wins over the tier (`resolveSize`). The console shows "Resources pinned by an admin" and disables the resize.
+
+### Enforcement
+
+No admission policy guards requests or crews (Decision 4), so enforcement is the
+same two layers as 3b and 3c:
+
+| Layer | What it enforces |
+|---|---|
+| Console code | Per-field authz from the table above. The crew patch is built from an allowlist of fields (`suspend`, `startedAt`, `schedule`, `mcpConfigRef`) and never carries `size`; a test asserts it. Values come only from `{schedule}`, `{mcpConfigRef}` or `{size, reason}` form fields. |
+| RBAC | Only the console SA and the operator may write crews and requests. RBAC cannot narrow `patch` by field, which is why the field set is code-enforced. `size` is written only by the operator's request controller, so a console bug cannot grant a size without an approved request. |
+| Operator | `canDecide` and the owner check on resize stay as defence in depth. |
+
+### Effect on the pod and disk
+
+| Change | Running pod | Disk (PVC) |
+|---|---|---|
+| Schedule | Pod template unchanged. The crew controller recomputes desired state (latest event wins, Decision 1), so the edit may start or stop the crew at once. The console runs the same `computeDesired` to preview this ("Saving will stop your crew now"). | Untouched |
+| Size, crew running | New resources in the pod template, so the StatefulSet replaces the pod: a short outage, and in-flight sessions end. The pod may stay `Pending` if no node fits; the crew card shows it. | Kept. The crew controller patches the data PVC to the new tier's storage when larger (`volumeClaimTemplates` are immutable, so the template keeps its original size). Never shrunk. If the StorageClass does not allow expansion, CPU and memory still change and the crew reports `StorageResized=False`. |
+| Size, crew stopped | Applied at the next start | As above |
+| MCP config ref | The volume source changes, so the pod is replaced | Untouched |
+
+Editing an MCP ConfigMap's content stays a deployment-plane change (`helm upgrade`), not a console action.
+
+### Operator RBAC added
+
+| Controller | Resource | Verbs |
+|---|---|---|
+| request controller | `kirocrews` | patch (adds to get, list, watch, create) |
+| request controller | `kirocrewconfigs` | get, list, watch, for `allowedSizes`, unless 3d already grants it |
+| crew controller | `persistentvolumeclaims` | patch, already granted |
 
 ## Build plan
 
@@ -343,3 +410,4 @@ the authentication step regardless.
 | **3b** requests + approvals | Request form (sizes, optional schedule), cancel own Pending request, approve/deny with `decision.by` from session (no admission policy, Decision 4); per-session write rate limits. `allowedSizes`/`defaultSize` wait for the `KiroCrewConfig` editor in 3d | requests create, patch, delete | posted `by=`/`requester=` ignored; non-manager approval → 403; a no-manager user's request is approvable only by an admin |
 | **3c** start/stop + sign-in | `startedAt` field + `computeDesired`/`inUpWindow` change: latest of last Up, last Down, `startedAt` wins, requeue includes next Down after `startedAt` (Decision 1); start/stop; broker with exec VAP; re-verify gateway facts on the pinned image | crews patch, pods get, pods/exec | the token never appears in logs (captured logger); the VAP denies `sh`; non-owner `/open` → 403; a redirect host outside `tailnet.domain` → refused |
 | **3d** admin config | Accounts CRUD (last-admin guard), `KiroCrewConfig` editor; crew controller reads images and MCP ref from config | accounts write, config `default` write | demote-last-admin refused; config change rolls gateway image on the next reconcile |
+| **3e** edit a crew | Edit form on the crew card: schedule (direct), resize via a `crewRef` request with an `Applied` phase, MCP config from the `mcpConfigs` allowlist (admin); CEL immutability on request spec; crew controller grows the data PVC on resize | console: no new verbs (crews patch field set widens); operator: crews patch, configs read | console patch never carries `size`; a resize of someone else's crew → `Invalid`; an approved resize replaces the pod and grows the PVC, a downsize leaves it; a swapped size after approval is rejected; a non-admin MCP change → 403 |
