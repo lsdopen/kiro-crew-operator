@@ -1,0 +1,32 @@
+{{- if .Values.console.enabled }}
+# Read-only on crews, requests and accounts; create on accounts for self sign-up.
+# Nothing else: no Secrets, no pods/exec, no update or patch.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kiro-crew-operator.console.name" . }}
+  labels:
+    {{- include "kiro-crew-operator.console.labels" . | nindent 4 }}
+rules:
+- apiGroups: ["kirocrew.lsdopen.io"]
+  resources: ["kirocrews", "kirocrewrequests", "kirocrewaccounts"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["kirocrew.lsdopen.io"]
+  resources: ["kirocrewaccounts"]
+  verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kiro-crew-operator.console.name" . }}
+  labels:
+    {{- include "kiro-crew-operator.console.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kiro-crew-operator.console.name" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "kiro-crew-operator.console.name" . }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -1,0 +1,22 @@
+# Build the console binary. Build from the repo root:
+#   docker build -f images/console/Containerfile .
+ARG BASE_IMAGE=golang:1.26
+# Cross-compile on the build host instead of emulating the target (see Dockerfile).
+FROM --platform=${BUILDPLATFORM} ${BASE_IMAGE} AS builder
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+
+# .dockerignore filters this down to Go sources and the embedded static assets.
+COPY . .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o console ./cmd/console
+
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /workspace/console .
+USER 65532:65532
+
+ENTRYPOINT ["/console"]

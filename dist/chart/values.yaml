@@ -214,3 +214,56 @@ tailnet:
   # The tailnet's MagicDNS suffix, e.g. "example-tailnet.ts.net".
   # Required for the operator to report each instance's dashboard URL.
   domain: ""
+
+## Management console (opt-in). A separate Deployment with its own
+## ServiceAccount; it does not need the manager. See docs/design/console.md.
+##
+console:
+  enabled: false
+
+  replicas: 2
+
+  image:
+    # Published by .github/workflows/release.yml with the same tag as the operator.
+    repository: ghcr.io/lsdopen/kiro-crew-console
+    ## Image tag (defaults to Chart.appVersion if not set)
+    # tag: ""
+    pullPolicy: IfNotPresent
+
+  # imagePullSecrets:
+  #   - name: myregistrykey
+
+  ## Namespace holding KiroCrews and KiroCrewRequests. Empty watches them all.
+  crewNamespace: kiro-crews
+
+  auth:
+    ## Only "google" is implemented.
+    provider: google
+    issuerURL: https://accounts.google.com
+    redirectURL: https://console.example.com/auth/callback
+    ## Workspace domains allowed to sign in, e.g. [example.com]. This is the only
+    ## boundary on who gets an account. Empty refuses every login and the console
+    ## refuses to start unless allowEmptyDomains is set.
+    allowedDomains: []
+    allowEmptyDomains: false
+    ## Secret with keys client-id, client-secret and cookie-key (32+ bytes). It is
+    ## created out of band and is never read from values. Name only, not a secret.
+    existingSecret: kiro-crew-console-auth
+
+  ## Exposure is the operator's choice: set class and annotations for a private or
+  ## public ingress. SSO is the authentication step either way.
+  ingress:
+    enabled: false
+    className: ""
+    host: console.example.com
+    annotations: {}
+    tls:
+      enabled: true
+      secretName: ""
+
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 128Mi

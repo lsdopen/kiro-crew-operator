@@ -1,0 +1,10 @@
+body{font:15px/1.5 system-ui,sans-serif;margin:0;color:#1b1f23}
+header{display:flex;gap:1rem;align-items:center;padding:.6rem 1.2rem;background:#14213d;color:#fff}
+header a{color:#fff;text-decoration:none}
+header nav{display:flex;gap:1rem;flex:1}
+header form{margin:0}
+main{padding:1.2rem;max-width:72rem;margin:0 auto}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #d8dee4;vertical-align:top}
+.muted{color:#57606a}
+button{font:inherit;cursor:pointer}

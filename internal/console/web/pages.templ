@@ -1,0 +1,153 @@
+package web
+
+templ Layout(p Page) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false}'/>
+			<title>Kiro Crew console</title>
+			<link rel="stylesheet" href="/static/console.css"/>
+			<script src="/static/htmx.min.js" defer></script>
+		</head>
+		<body hx-headers={ templ.JSONString(map[string]string{"X-CSRF-Token": p.CSRF}) }>
+			<header>
+				<strong>Kiro Crew</strong>
+				<nav>
+					@navLink("/crews", "Crews")
+					@navLink("/requests", "Requests")
+					if p.Role == "admin" {
+						@navLink("/accounts", "Accounts")
+					}
+				</nav>
+				<span class="muted">{ p.Email } ({ p.Role })</span>
+				<form method="post" action="/auth/logout">
+					<input type="hidden" name="csrf_token" value={ p.CSRF }/>
+					<button type="submit">Sign out</button>
+				</form>
+			</header>
+			<main id="content">
+				@Content(p)
+			</main>
+		</body>
+	</html>
+}
+
+templ navLink(href, label string) {
+	<a href={ templ.SafeURL(href) } hx-get={ href } hx-target="#content" hx-push-url="true">{ label }</a>
+}
+
+templ Content(p Page) {
+	switch p.Active {
+		case "requests":
+			@Requests(p)
+		case "accounts":
+			@Accounts(p)
+		default:
+			@Crews(p)
+	}
+}
+
+templ Crews(p Page) {
+	<h2>Crews</h2>
+	if len(p.Crews) == 0 {
+		<p class="muted">No crews yet.</p>
+	} else {
+		<table>
+			<thead>
+				<tr>
+					<th>Name</th>
+					if p.ShowOwner {
+						<th>Owner</th>
+					}
+					<th>Phase</th>
+					<th>Schedule</th>
+					<th>Dashboard</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, c := range p.Crews {
+					<tr>
+						<td>{ c.Name }</td>
+						if p.ShowOwner {
+							<td>{ c.Owner }</td>
+						}
+						<td>{ c.Phase }</td>
+						<td>{ c.Schedule }</td>
+						<td>
+							if c.DashboardURL != "" {
+								<a href={ templ.URL(c.DashboardURL) } rel="noopener noreferrer">Open</a>
+								<div class="muted">Requires Tailscale, connected as { p.Email }</div>
+							} else if c.LoginURL != "" {
+								<a href={ templ.URL(c.LoginURL) } rel="noopener noreferrer">Authenticate your crew node</a>
+							}
+						</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}
+
+templ Requests(p Page) {
+	<h2>Requests</h2>
+	if len(p.Requests) == 0 {
+		<p class="muted">No requests.</p>
+	} else {
+		<table>
+			<thead>
+				<tr>
+					<th>Name</th>
+					if p.ShowOwner {
+						<th>Requester</th>
+					}
+					<th>Size</th>
+					<th>Phase</th>
+					<th>Decided by</th>
+					<th>Crew</th>
+					<th>Reason</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, q := range p.Requests {
+					<tr>
+						<td>{ q.Name }</td>
+						if p.ShowOwner {
+							<td>{ q.Requester }</td>
+						}
+						<td>{ q.Size }</td>
+						<td>{ q.Phase }</td>
+						<td>{ q.DecidedBy }</td>
+						<td>{ q.CrewRef }</td>
+						<td>{ q.Reason }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}
+
+templ Accounts(p Page) {
+	<h2>Accounts</h2>
+	<table>
+		<thead>
+			<tr>
+				<th>Email</th>
+				<th>Name</th>
+				<th>Role</th>
+				<th>Manager</th>
+			</tr>
+		</thead>
+		<tbody>
+			for _, a := range p.Accounts {
+				<tr>
+					<td>{ a.Email }</td>
+					<td>{ a.DisplayName }</td>
+					<td>{ a.Role }</td>
+					<td>{ a.Manager }</td>
+				</tr>
+			}
+		</tbody>
+	</table>
+}

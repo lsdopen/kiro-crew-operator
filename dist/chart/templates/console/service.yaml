@@ -1,0 +1,17 @@
+{{- if .Values.console.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kiro-crew-operator.console.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kiro-crew-operator.console.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "kiro-crew-operator.console.selectorLabels" . | nindent 4 }}
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+{{- end }}

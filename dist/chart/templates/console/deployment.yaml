@@ -1,0 +1,79 @@
+{{- if .Values.console.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kiro-crew-operator.console.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kiro-crew-operator.console.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.console.replicas }}
+  selector:
+    matchLabels:
+      {{- include "kiro-crew-operator.console.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kiro-crew-operator.console.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "kiro-crew-operator.console.name" . }}
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.console.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: console
+        image: "{{ .Values.console.image.repository }}:{{ .Values.console.image.tag | default .Chart.AppVersion }}"
+        {{- with .Values.console.image.pullPolicy }}
+        imagePullPolicy: {{ . }}
+        {{- end }}
+        command: ["/console"]
+        args:
+        - --bind-address=:8080
+        - --auth-provider={{ .Values.console.auth.provider }}
+        - --auth-issuer-url={{ .Values.console.auth.issuerURL }}
+        - --auth-redirect-url={{ .Values.console.auth.redirectURL }}
+        - --auth-allowed-domains={{ join "," .Values.console.auth.allowedDomains }}
+        {{- if .Values.console.auth.allowEmptyDomains }}
+        - --auth-allow-empty-domains
+        {{- end }}
+        - --auth-secret-dir=/etc/console/auth
+        - --crew-namespace={{ .Values.console.crewNamespace }}
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: http
+          periodSeconds: 10
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          {{- toYaml .Values.console.resources | nindent 10 }}
+        volumeMounts:
+        - name: auth
+          mountPath: /etc/console/auth
+          readOnly: true
+      volumes:
+      - name: auth
+        secret:
+          # Holds client-id, client-secret and cookie-key (at least 32 bytes).
+          secretName: {{ required "console.auth.existingSecret is required" .Values.console.auth.existingSecret }}
+          defaultMode: 0440
+{{- end }}
