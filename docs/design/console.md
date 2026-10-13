@@ -30,10 +30,18 @@ document is decided.
    the console ServiceAccount plus a configurable break-glass group
    (`console.decisionBreakGlassGroups`, default `[]`). That turns the
    request controller's `canDecide` from a hint into a guarantee.
-5. **Is Google SSO the only gate on a public console?** The console holds
-   exec into every crew. *Recommend:* SSO stays the only *authentication*
-   step, as decided. The chart docs recommend (not require) an ingress IP
-   allowlist or WAF, and the threat model assumes neither.
+5. **Should the chart docs recommend a private ingress as the default, with
+   public as the opt-in?** The console holds exec into every crew. Its
+   Ingress may be private (internal load balancer, VPN-only, private DNS) or
+   public; that is the operator's choice. *Recommend:* yes in the docs, not in
+   the chart defaults. The docs lead with the private example and present
+   public as an opt-in, with an IP allowlist or WAF suggested (not required).
+   A private console costs users little, since opening a crew already needs
+   the tailnet. The chart itself stays exposure-neutral (`ingress.enabled:
+   false`, empty `className` and `annotations`), because it cannot know a
+   cluster's controllers or load balancer scheme. SSO stays the only
+   *authentication* step either way, as decided, and the threat model assumes
+   neither a private network nor an allowlist.
 6. **Can users request on someone else's behalf?** *Recommend:* no.
    `spec.requester` is always the session email. An admin who wants a crew
    for someone creates the account and that person requests it.
@@ -58,7 +66,7 @@ Flagged on the decisions already made:
 ## Architecture
 
 ```
-browser ──https──> Ingress (class, TLS, annotations: WAF/allowlist/oauth2-proxy)
+browser ──https──> Ingress, private or public (class, TLS, annotations: WAF/allowlist/oauth2-proxy)
                      │
                      ▼
             kiro-crew-console (Deployment, 2 replicas, no sidecar)
@@ -175,7 +183,7 @@ which redeem only from the owner's own device. It cannot get a shell.
 VAP supports `CONNECT`; 3c verifies it on the target cluster version before
 granting `pods/exec`.
 
-### Token path through a public console
+### Token path through the console's Ingress, private or public
 
 | Hop | Control |
 |---|---|
@@ -184,7 +192,7 @@ granting `pods/exec`.
 | Target | The host is taken only from `status.dashboardURL`, which must be `https://` with a host ending `.<tailnet.domain>`. Otherwise the request is refused. |
 | Response | `303`, `Location: <dashboardURL>/?token=<t>`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, and an empty body. |
 | Logging | The broker handler's logger has no URL or header fields. A unit test asserts the token is absent from all log output. The access-log middleware logs method, path and status, never response headers. |
-| Ingress | The default nginx and Traefik access logs record the request line, not response headers. Docs warn against custom formats that log `$sent_http_location`. oauth2-proxy in front: confirm it does not log upstream response headers. |
+| Ingress | The default nginx and Traefik access logs, and AWS ALB access logs, record the request line, not response headers. Docs warn against custom formats that log `$sent_http_location`. oauth2-proxy in front: confirm it does not log upstream response headers. |
 | Browser | The URL lands in history. The link window is 5 min and the nonce is single-use. It redeems only via the owner's tailnet identity. |
 
 ### Option (b) upstream proposal (outline)
@@ -201,7 +209,7 @@ console links `dashboardURL` directly.
 
 | Fact | Effect for the user |
 |---|---|
-| Console is public, crews are tailnet-only (`autogroup:self`, tcp:8080 via serve) | Signing in to the console works anywhere. **Opening a crew needs the Tailscale client connected as the owner.** Off the tailnet, `*.ts.net` does not resolve. |
+| Console is reached through its Ingress, private or public; crews are tailnet-only (`autogroup:self`, tcp:8080 via serve) | Signing in to the console works from wherever that Ingress is reachable: anywhere if public, the internal network or VPN if private. **Opening a crew needs the Tailscale client connected as the owner.** Off the tailnet, `*.ts.net` does not resolve. |
 | Console cannot see the browser's tailnet state | The Open button explains this up front ("Requires Tailscale, connected as you@example.com"). The console does not probe. |
 | `status.dashboardURL` is empty until the node joins | The crew card shows `status.tailnetLoginURL` (owner only) as "Authenticate your crew node", then the Open button once joined. |
 | First Kiro login (device code) happens inside the dashboard | The console shows a `KiroAuthenticated` condition hint. It does not broker it. |
@@ -275,12 +283,61 @@ console:
   resources: {requests: {cpu: 10m, memory: 64Mi}, limits: {memory: 128Mi}}
 ```
 
+Exposure is the operator's choice: the console's Ingress, private or public,
+is set entirely by `ingress.className` and `ingress.annotations`. The Google
+callback is a browser redirect, so a private host works; the console Pod needs
+egress to the provider's discovery and JWKS endpoints either way.
+
+Private, AWS ALB with the internal scheme (TLS terminates at the ALB via ACM):
+
+```yaml
+console:
+  trustedProxies: [10.0.0.0/16]          # VPC CIDR the ALB ENIs sit in
+  auth:
+    redirectURL: https://console.internal.example.com/auth/callback
+  ingress:
+    enabled: true
+    className: alb
+    host: console.internal.example.com   # private DNS zone
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internal
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+      alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:eu-west-1:111122223333:certificate/00000000-0000-0000-0000-000000000000
+    tls:
+      enabled: true
+```
+
+Public, ingress-nginx with cert-manager TLS:
+
+```yaml
+console:
+  trustedProxies: [10.42.0.0/16]         # pod CIDR of the ingress-nginx controller
+  auth:
+    redirectURL: https://console.example.com/auth/callback
+  ingress:
+    enabled: true
+    className: nginx
+    host: console.example.com
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt
+      nginx.ingress.kubernetes.io/whitelist-source-range: 203.0.113.0/24  # optional allowlist
+    tls:
+      enabled: true
+      secretName: console-example-com-tls
+```
+
 Templates: `templates/console/{deployment,service,ingress,serviceaccount,rbac,vap}.yaml`,
 plus a NetworkPolicy allowing ingress only from the ingress controller
-namespace. The Pod runs non-root with a read-only rootfs and drops ALL
+namespace (with an ALB in `ip` mode, traffic arrives from the ALB's subnets,
+so the policy admits the `trustedProxies` CIDRs instead). The Pod runs non-root with a read-only rootfs and drops ALL
 capabilities. `tailnet.domain` is reused for redirect validation.
 
 ## Threat model
+
+Every control below applies whether the console's Ingress is private or
+public. A private ingress narrows who can reach the login page, but SSO stays
+the authentication step regardless.
 
 | Threat | Mitigation |
 |---|---|
@@ -292,9 +349,9 @@ capabilities. `tailnet.domain` is reused for redirect validation.
 | Manager approves a non-report | Code check plus the operator's `canDecide` (marks the request `Invalid`) |
 | Sign-in token leak | Only in one `Location` header to the verified owner; never logged or stored; 5 min, single-use, and redeemable only via the owner's tailnet identity |
 | Console compromise | VAP limits exec to `kirocrew token`; no Secrets access; crews stay tailnet-gated, so a minted link is useless to an attacker who is not the owner |
-| Brute force / DoS on a public endpoint | Per-IP limits on `/auth/*`, per-session limits on writes and `/open`, ingress-level limits via annotations, 2 stateless replicas |
+| Brute force / DoS on the console's Ingress, private or public | Per-IP limits on `/auth/*`, per-session limits on writes and `/open`, ingress-level limits via annotations, 2 stateless replicas |
 | Ingress header spoofing | `X-Forwarded-For` trusted only from `trustedProxies`; NetworkPolicy admits only the ingress controller |
-| SSO is the single factor | Accepted (Decision 5). Workspace-level MFA and the optional ingress allowlist are the layers above it. |
+| SSO is the single factor | Accepted (Decision 5). Workspace-level MFA and, optionally, a private ingress or an ingress allowlist are the layers above it. |
 
 ## Build plan
 
