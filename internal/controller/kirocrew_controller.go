@@ -196,7 +196,12 @@ func (r *KiroCrewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, fmt.Errorf("reconciling StatefulSet: %w", err)
 	}
 
-	if err := r.reconcileStatus(ctx, &crew, desired); err != nil {
+	storage, err := r.growStorage(ctx, &crew)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("growing data volume: %w", err)
+	}
+
+	if err := r.reconcileStatus(ctx, &crew, desired, storage); err != nil {
 		return ctrl.Result{}, fmt.Errorf("reconciling status: %w", err)
 	}
 
@@ -620,9 +625,39 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 	return err
 }
 
+// growStorage expands the data PVC to the tier's storage when that is larger; it never shrinks.
+// A refused expansion comes back as a StorageResized=False condition, not an error.
+func (r *KiroCrewReconciler) growStorage(ctx context.Context, crew *kirocrewv1alpha1.KiroCrew) (*metav1.Condition, error) {
+	_, want := resolveSize(crew)
+	pvc := &corev1.PersistentVolumeClaim{}
+	key := types.NamespacedName{Namespace: crew.Namespace, Name: fmt.Sprintf("%s-%s-0", dataVolumeName, instanceName(crew))}
+	if err := r.Get(ctx, key, pvc); err != nil {
+		return nil, client.IgnoreNotFound(err)
+	}
+	if have := pvc.Spec.Resources.Requests[corev1.ResourceStorage]; have.Cmp(want) >= 0 {
+		return nil, nil
+	}
+	orig := pvc.DeepCopy()
+	if pvc.Spec.Resources.Requests == nil {
+		pvc.Spec.Resources.Requests = corev1.ResourceList{}
+	}
+	pvc.Spec.Resources.Requests[corev1.ResourceStorage] = want
+	err := r.Patch(ctx, pvc, client.MergeFrom(orig))
+	switch {
+	case apierrors.IsForbidden(err) || apierrors.IsInvalid(err):
+		return &metav1.Condition{
+			Type: kirocrewv1alpha1.ConditionStorageResized, Status: metav1.ConditionFalse,
+			Reason: kirocrewv1alpha1.ReasonResizeRefused, Message: "Data volume was not grown: " + err.Error(),
+		}, nil
+	case err != nil:
+		return nil, err
+	}
+	return nil, nil
+}
+
 // reconcileStatus reports readiness, the tailnet dashboard address, and — while
 // the node is still unauthenticated — the login URL its owner must open.
-func (r *KiroCrewReconciler) reconcileStatus(ctx context.Context, crew *kirocrewv1alpha1.KiroCrew, desired desiredState) error {
+func (r *KiroCrewReconciler) reconcileStatus(ctx context.Context, crew *kirocrewv1alpha1.KiroCrew, desired desiredState, storage *metav1.Condition) error {
 	var sts appsv1.StatefulSet
 	err := r.Get(ctx, types.NamespacedName{Name: instanceName(crew), Namespace: crew.Namespace}, &sts)
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -718,6 +753,12 @@ func (r *KiroCrewReconciler) reconcileStatus(ctx context.Context, crew *kirocrew
 		upsertCondition(&patched.Status.Conditions, scheduled)
 	default:
 		meta.RemoveStatusCondition(&patched.Status.Conditions, kirocrewv1alpha1.ConditionScheduled)
+	}
+
+	if storage != nil {
+		upsertCondition(&patched.Status.Conditions, *storage)
+	} else {
+		meta.RemoveStatusCondition(&patched.Status.Conditions, kirocrewv1alpha1.ConditionStorageResized)
 	}
 
 	return r.Status().Patch(ctx, patched, client.MergeFrom(crew))

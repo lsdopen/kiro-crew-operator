@@ -31,10 +31,10 @@ func crewPeople() []client.Object {
 	return people(acct(mgr2, v1alpha1.RoleManager, ""), aliceCrew())
 }
 
-func (e *env) crew(name string) *v1alpha1.KiroCrew {
+func (e *env) theCrew() *v1alpha1.KiroCrew {
 	e.t.Helper()
 	c := &v1alpha1.KiroCrew{}
-	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: name}, c); err != nil {
+	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: crewAliceKey}, c); err != nil {
 		e.t.Fatal(err)
 	}
 	return c
@@ -85,7 +85,7 @@ func TestStartPatchesOnlySuspendAndStartedAt(t *testing.T) {
 		t.Fatalf("patch = %s", e.patches[0])
 	}
 
-	got := e.crew("alice")
+	got := e.theCrew()
 	if got.Spec.Owner != alice || got.Spec.Size != v1alpha1.SizePower || got.Spec.Suspend || got.Spec.Schedule == nil {
 		t.Fatalf("spec = %+v", got.Spec)
 	}
@@ -104,7 +104,7 @@ func TestStopPatchesOnlySuspend(t *testing.T) {
 	if len(e.patches) != 1 || string(e.patches[0]) != `{"spec":{"suspend":true}}` {
 		t.Fatalf("patches = %q", e.patches)
 	}
-	got := e.crew("alice")
+	got := e.theCrew()
 	if !got.Spec.Suspend || got.Spec.StartedAt == nil || got.Spec.Owner != alice {
 		t.Fatalf("spec = %+v", got.Spec)
 	}

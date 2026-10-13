@@ -15,7 +15,7 @@ const (
 )
 
 // RequestPhase is where a request is in its lifecycle.
-// +kubebuilder:validation:Enum=Pending;Approved;Denied;Provisioned;Invalid
+// +kubebuilder:validation:Enum=Pending;Approved;Denied;Provisioned;Applied;Invalid
 type RequestPhase string
 
 const (
@@ -23,6 +23,7 @@ const (
 	PhaseApproved    RequestPhase = "Approved"
 	PhaseDenied      RequestPhase = "Denied"
 	PhaseProvisioned RequestPhase = "Provisioned"
+	PhaseApplied     RequestPhase = "Applied"
 	PhaseInvalid     RequestPhase = "Invalid"
 )
 
@@ -38,7 +39,9 @@ type Decision struct {
 	By string `json:"by"`
 }
 
-// KiroCrewRequestSpec is a person's ask for a crew.
+// KiroCrewRequestSpec is a person's ask for a crew, or with crewRef for a resize of theirs.
+// +kubebuilder:validation:XValidation:rule="!has(self.crewRef) || !has(self.schedule)",message="a resize request cannot carry a schedule"
+// +kubebuilder:validation:XValidation:rule="self.requester == oldSelf.requester && self.size == oldSelf.size && has(self.schedule) == has(oldSelf.schedule) && (!has(self.schedule) || self.schedule == oldSelf.schedule) && has(self.crewRef) == has(oldSelf.crewRef) && (!has(self.crewRef) || self.crewRef == oldSelf.crewRef)",message="requester, size, schedule and crewRef are immutable; only decision and reason may change"
 type KiroCrewRequestSpec struct {
 	// Requester is the email of the person the crew is for. It must match a KiroCrewAccount.
 	// +required
@@ -53,6 +56,13 @@ type KiroCrewRequestSpec struct {
 	// Schedule is the requested start/stop window.
 	// +optional
 	Schedule *ScheduleSpec `json:"schedule,omitempty"`
+
+	// CrewRef turns the request into a resize of this existing crew, which the
+	// requester must own. Empty means a request for a new crew.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	CrewRef string `json:"crewRef,omitempty"`
 
 	// Reason is why the crew is wanted.
 	// +optional
@@ -73,6 +83,8 @@ const (
 	ReasonUnauthorisedApprover = "UnauthorisedApprover"
 	ReasonCrewNameTaken        = "CrewNameTaken"
 	ReasonSizeNotAllowed       = "SizeNotAllowed"
+	ReasonCrewNotFound         = "CrewNotFound"
+	ReasonNotOwner             = "NotOwner"
 )
 
 // KiroCrewRequestStatus defines the observed state of KiroCrewRequest.
@@ -89,7 +101,7 @@ type KiroCrewRequestStatus struct {
 	// +optional
 	DecidedAt *metav1.Time `json:"decidedAt,omitempty"`
 
-	// CrewRef is the name of the KiroCrew created for this request.
+	// CrewRef is the name of the KiroCrew created or resized for this request.
 	// +optional
 	CrewRef string `json:"crewRef,omitempty"`
 

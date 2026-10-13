@@ -58,7 +58,7 @@ func (s *Server) writeFailed(w http.ResponseWriter, r *http.Request, err error) 
 		s.fail(w, r, http.StatusBadRequest, invalid.Msg)
 	case errors.Is(err, authz.ErrForbidden):
 		s.fail(w, r, http.StatusForbidden, "forbidden")
-	case errors.Is(err, authz.ErrNotFound), errors.Is(err, authz.ErrAccountNotFound), errors.Is(err, authz.ErrConfigNotFound):
+	case errors.Is(err, authz.ErrNotFound), errors.Is(err, authz.ErrCrewNotFound), errors.Is(err, authz.ErrAccountNotFound), errors.Is(err, authz.ErrConfigNotFound):
 		s.fail(w, r, http.StatusNotFound, err.Error())
 	case errors.Is(err, authz.ErrNotPending), errors.Is(err, authz.ErrConflict), errors.Is(err, authz.ErrLastAdmin),
 		errors.Is(err, authz.ErrOpenRequest), errors.Is(err, authz.ErrHasCrew):

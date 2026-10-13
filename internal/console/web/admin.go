@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -46,6 +47,7 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, sess *auth
 		AllowedSizes: r.PostForm["allowed"], DefaultSize: r.PostForm.Get("default_size"),
 		GatewayImage: r.PostForm.Get("gateway_image"), TailscaleImage: r.PostForm.Get("tailscale_image"),
 		MCPConfigRef: r.PostForm.Get("mcp_config_ref"),
+		MCPConfigs:   strings.Fields(r.PostForm.Get("mcp_configs")),
 	}
 	if err := s.Store.UpdateConfig(r.Context(), acct, in); err != nil {
 		s.writeFailed(w, r, err)

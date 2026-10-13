@@ -45,6 +45,14 @@ type KiroCrewConfigSpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=253
 	MCPConfigRef string `json:"mcpConfigRef,omitempty"`
+
+	// MCPConfigs are the ConfigMap names, in the crew namespace, an admin may
+	// choose from when setting a crew's mcpConfigRef in the console.
+	// +optional
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MaxLength=253
+	// +listType=set
+	MCPConfigs []string `json:"mcpConfigs,omitempty"`
 }
 
 // Sizes returns the allowed tiers and the default one, falling back to every
