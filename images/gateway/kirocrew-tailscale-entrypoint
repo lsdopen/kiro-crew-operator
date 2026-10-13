@@ -1,0 +1,80 @@
+#!/bin/bash
+# Runs tailscaled (userspace, Tailscale SSH) beside the gateway, both as the
+# image's non-root user. If either process exits, the container exits.
+set -euo pipefail
+
+home="${HOME:-/home/kirocrew}"
+state_dir="${TS_STATE_DIR:-${home}/.tailscale}"
+socket="${TS_SOCKET:-/var/run/tailscale/tailscaled.sock}"
+ts_hostname="${TS_HOSTNAME:-$(hostname)}"
+
+# Clean env so credentials upstream's entrypoint scrubs never reach tailscaled.
+ts_env=(env -i "PATH=${PATH}" "HOME=${home}")
+
+# SSH sessions do not inherit the container env; publish the non-credential KiroCrew settings.
+env_file="${home}/.kirocrew-env"
+(
+	umask 077
+	for name in $(compgen -v | grep -E '^(KIROCREW_|KIRO_AUTH_|MCP_CONFIG_PATH$)' | grep -vE '(TOKEN|SECRET|PASSWORD|KEY|_ID$)' || true); do
+		printf 'export %s=%q\n' "${name}" "${!name}"
+	done >"${env_file}"
+)
+
+mkdir -p "${state_dir}" "$(dirname "${socket}")"
+
+"${ts_env[@]}" tailscaled --tun=userspace-networking \
+	--statedir="${state_dir}" --state="${state_dir}/tailscaled.state" \
+	--socket="${socket}" &
+tailscaled_pid=$!
+
+for _ in $(seq 1 60); do
+	[ -S "${socket}" ] && break
+	kill -0 "${tailscaled_pid}" 2>/dev/null || { echo "[tailscale] tailscaled exited during startup" >&2; exit 1; }
+	sleep 0.5
+done
+[ -S "${socket}" ] || { echo "[tailscale] tailscaled socket never appeared" >&2; exit 1; }
+
+# `tailscale up` blocks until the owner authenticates; repeat its login URL so it stays in the log tail.
+join_tailnet() {
+	"${ts_env[@]}" tailscale up --reset --ssh --accept-dns=false --hostname="${ts_hostname}" 2>&1 &
+	local up_pid=$! url
+	while kill -0 "${up_pid}" 2>/dev/null; do
+		sleep 30
+		url=$("${ts_env[@]}" tailscale status --json 2>/dev/null | sed -n 's/^ *"AuthURL": *"\([^"]*\)".*/\1/p' | head -n 1 || true)
+		if [ -n "${url}" ] && kill -0 "${up_pid}" 2>/dev/null; then
+			echo "To authenticate, visit: ${url}"
+		fi
+	done
+	wait "${up_pid}"
+	echo "[tailscale] joined the tailnet as ${ts_hostname}"
+}
+join_tailnet &
+join_pid=$!
+
+kirocrew-entrypoint "$@" &
+gateway_pid=$!
+
+shutdown() {
+	kill -TERM "${gateway_pid}" "${tailscaled_pid}" "${join_pid}" 2>/dev/null || true
+	wait 2>/dev/null || true
+}
+trap 'shutdown; exit 143' TERM INT
+
+who=""
+rc=0
+wait -n -p who "${tailscaled_pid}" "${gateway_pid}" "${join_pid}" || rc=$?
+if [ "${who}" = "${join_pid}" ] && [ "${rc}" -eq 0 ]; then
+	# The tailnet join finished cleanly; keep supervising the other two.
+	who=""
+	rc=0
+	wait -n -p who "${tailscaled_pid}" "${gateway_pid}" || rc=$?
+fi
+
+if [ "${who}" = "${tailscaled_pid}" ]; then
+	echo "[tailscale] tailscaled exited (status ${rc}); stopping the container" >&2
+	[ "${rc}" -ne 0 ] || rc=1
+elif [ "${who}" = "${join_pid}" ]; then
+	echo "[tailscale] joining the tailnet failed (status ${rc}); stopping the container" >&2
+fi
+shutdown
+exit "${rc}"

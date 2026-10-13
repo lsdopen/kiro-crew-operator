@@ -247,7 +247,6 @@ Two homes, split by plane and blast radius:
 | `defaultSize` | `Size` | `light` | request form |
 | `defaultSchedule` | `*ScheduleSpec` | nil | request form |
 | `gateway.image` | string | operator's compiled `defaultGatewayImage` | crew controller, live (lets admins roll the fleet) |
-| `tailscale.image` | string | compiled `defaultTailscaleImage` | crew controller, live |
 | `mcpConfigRef` | string | "" | crew controller, when `KiroCrew.spec.mcpConfigRef` is empty |
 | `mcpConfigs` | `[]string` | [] | console MCP picker (3e); ConfigMap names in crewNamespace |
 | `signIn.sessionTTL` | `metav1.Duration` | 8h, max 20h | broker's `--ttl` |

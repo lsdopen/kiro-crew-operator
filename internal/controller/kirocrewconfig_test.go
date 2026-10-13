@@ -21,7 +21,6 @@ var _ = Describe("KiroCrewConfig", func() {
 		ns       = "default"
 		gwOne    = "registry.example.com/gateway:1.0.0"
 		gwTwo    = "registry.example.com/gateway:1.1.0"
-		tsImage  = "registry.example.com/tailscale:1.2.3"
 		ownImage = "registry.example.com/own:9.9.9"
 	)
 
@@ -68,14 +67,13 @@ var _ = Describe("KiroCrewConfig", func() {
 	It("rolls the crew's images and MCP ref from the config on the next reconcile", func() {
 		cfg := newConfig(kirocrewv1alpha1.KiroCrewConfigSpec{
 			Gateway:      kirocrewv1alpha1.ImageRef{Image: gwOne},
-			Tailscale:    kirocrewv1alpha1.ImageRef{Image: tsImage},
 			MCPConfigRef: "shared-mcp",
 		})
 		Expect(k8sClient.Create(ctx, &kirocrewv1alpha1.KiroCrew{
 			ObjectMeta: metav1.ObjectMeta{Name: "cfg-crew", Namespace: ns},
 			Spec:       kirocrewv1alpha1.KiroCrewSpec{Owner: testOwner},
 		})).To(Succeed())
-		r := &KiroCrewReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), TailnetDomain: "example-tailnet.ts.net"}
+		r := &KiroCrewReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		key := types.NamespacedName{Name: "cfg-crew", Namespace: ns}
 		reconcileOnce := func() appsv1.StatefulSet {
 			GinkgoHelper()
@@ -88,7 +86,7 @@ var _ = Describe("KiroCrewConfig", func() {
 
 		sts := reconcileOnce()
 		Expect(sts.Spec.Template.Spec.Containers[0].Image).To(Equal(gwOne))
-		Expect(sts.Spec.Template.Spec.Containers[1].Image).To(Equal(tsImage))
+		Expect(sts.Spec.Template.Spec.Containers).To(HaveLen(1))
 		Expect(sts.Spec.Template.Spec.Volumes).To(ContainElement(HaveField("Name", "mcp-config")))
 
 		cfg.Spec.Gateway.Image = gwTwo

@@ -45,7 +45,7 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, sess *aut
 func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, sess *auth.Session, acct *v1alpha1.KiroCrewAccount) {
 	in := authz.ConfigEdit{
 		AllowedSizes: r.PostForm["allowed"], DefaultSize: r.PostForm.Get("default_size"),
-		GatewayImage: r.PostForm.Get("gateway_image"), TailscaleImage: r.PostForm.Get("tailscale_image"),
+		GatewayImage: r.PostForm.Get("gateway_image"),
 		MCPConfigRef: r.PostForm.Get("mcp_config_ref"),
 		MCPConfigs:   strings.Fields(r.PostForm.Get("mcp_configs")),
 	}

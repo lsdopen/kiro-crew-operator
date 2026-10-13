@@ -78,10 +78,10 @@ type RequestRow struct {
 
 // ConfigForm is the config editor's current values. Allowed has one entry per tier.
 type ConfigForm struct {
-	Allowed                                    []SizeChoice
-	DefaultSize                                string
-	GatewayImage, TailscaleImage, MCPConfigRef string
-	MCPConfigs                                 []string
+	Allowed                    []SizeChoice
+	DefaultSize                string
+	GatewayImage, MCPConfigRef string
+	MCPConfigs                 []string
 }
 
 // SizeChoice is one tier and whether the config allows it.
@@ -109,7 +109,7 @@ func newPage(v *authz.View, csrf, active string) Page {
 		NoManager: v.Me.Spec.Manager == "", DefaultSize: string(def),
 		Config: ConfigForm{
 			DefaultSize:  string(def),
-			GatewayImage: v.Config.Gateway.Image, TailscaleImage: v.Config.Tailscale.Image,
+			GatewayImage: v.Config.Gateway.Image,
 			MCPConfigRef: v.Config.MCPConfigRef, MCPConfigs: v.Config.MCPConfigs,
 		},
 		MCPConfigs: v.Config.MCPConfigs,

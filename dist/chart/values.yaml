@@ -212,7 +212,8 @@ networkPolicy:
 # ACLs -- see docs/tailnet.md for the policy to apply once, by hand.
 tailnet:
   # The tailnet's MagicDNS suffix, e.g. "example-tailnet.ts.net".
-  # Required for the operator to report each instance's dashboard URL.
+  # Used by the console to validate crew links. Crews are no longer published
+  # over HTTPS, so the manager does not read it.
   domain: ""
 
 ## Management console (opt-in). A separate Deployment with its own

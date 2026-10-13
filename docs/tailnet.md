@@ -28,31 +28,31 @@ once, and onboarding the seventy-first employee requires no policy change at all
 {
   "grants": [
     {
-      // Every member reaches only their OWN crew's dashboard.
+      // Every member reaches only their OWN crew over SSH.
       "src": ["autogroup:member"],
       "dst": ["autogroup:self"],
-      "ip":  ["tcp:8080"],
+      "ip":  ["tcp:22"],
+    },
+  ],
+  "ssh": [
+    {
+      "action": "accept",
+      "src":    ["autogroup:member"],
+      "dst":    ["autogroup:self"],
+      "users":  ["kirocrew"],
     },
   ],
 }
 ```
 
-There is no `ssh` block: Tailscale SSH is not enabled on these pods. The dashboard
-is the interface, and `kubectl exec` covers administrative access, so an SSH server
-on every crew would be a second way into a pod holding someone's Kiro token without
-adding a capability anyone needs.
+Tailscale SSH is the only way in. It runs inside the gateway container as the
+gateway's own non-root user, so the only login user it can serve is `kirocrew`, and
+a session is exactly as privileged as the gateway process. The desktop app uses it
+for the port forward to the loopback-only dashboard and to mint its login token.
 
 ## Tailnet prerequisites
 
-Both of these are settings on the tailnet, not on the cluster:
-
-1. **MagicDNS and HTTPS certificates must be enabled.** `tailscale serve` needs them
-   to publish `https://<hostname>.<tailnet>.ts.net`. This matters because the Kiro
-   Crew desktop app accepts `https://` to any host but plain `http://` only on
-   loopback — without a certificate there is no URL it will connect to.
-2. **`capabilities.tailnet_origin` must not be pinned off.** If your administrator
-   has pinned it, the gateway refuses to trust its tailnet origin and answers 403
-   even though the network path works.
+**MagicDNS must be enabled**, so the desktop app can reach `<hostname>.<tailnet>`.
 
 ## Key expiry
 
@@ -72,15 +72,9 @@ The login URL is reported in status because it cannot be delivered over the tail
 the node is still trying to join. The owner opens it, authenticates as themselves,
 and the node becomes their device.
 
-From then on:
-
-```console
-$ kubectl get kirocrew seagyn -o jsonpath='{.status.dashboardURL}'
-https://kiro-crew-seagyn.example-tailnet.ts.net
-```
-
-Open that in the desktop app via **New Connection Window**. The first connection may
-ask for the dashboard token once.
+From then on, add `kiro-crew-seagyn.example-tailnet.ts.net` as a remote crew in the
+desktop app, which forwards a local port to the dashboard over SSH and signs in
+with a token minted on the pod.
 
 The last step is the crew's own Kiro login: the gateway runs with
 `KIRO_AUTH_INSTALL_SHAPE=remote`, which forces the device-code flow, so it shows a

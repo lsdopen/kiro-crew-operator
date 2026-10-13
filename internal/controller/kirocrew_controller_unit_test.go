@@ -129,6 +129,20 @@ To authenticate, visit: https://login.tailscale.com/a/NEWNEWNEW
 	}
 }
 
+func TestOutstandingLoginURL(t *testing.T) {
+	url := "https://login.tailscale.com/a/ABC"
+	for name, tc := range map[string]struct{ logs, want string }{
+		"none":               {"just gateway noise", ""},
+		"waiting":            {"To authenticate, visit: " + url + "\nnoise", url},
+		"consumed":           {"To authenticate, visit: " + url + "\n" + tailnetJoinedMarker + " as x\nnoise", ""},
+		"re-auth after join": {tailnetJoinedMarker + " as x\nTo authenticate, visit: " + url, url},
+	} {
+		if got := outstandingLoginURL(tc.logs); got != tc.want {
+			t.Errorf("%s: got %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
 func TestTailnetLoginURLPatternIgnoresUnrelatedURLs(t *testing.T) {
 	if tailnetLoginURLPattern.MatchString("https://example.com/a/nope") {
 		t.Error("pattern matched a non-Tailscale URL")

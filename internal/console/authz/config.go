@@ -22,9 +22,9 @@ var ErrConfigNotFound = errors.New("config not found")
 
 // ConfigEdit is the form input of the config editor.
 type ConfigEdit struct {
-	AllowedSizes                               []string
-	DefaultSize                                string
-	GatewayImage, TailscaleImage, MCPConfigRef string
+	AllowedSizes               []string
+	DefaultSize                string
+	GatewayImage, MCPConfigRef string
 	// MCPConfigs is the allowlist crews' MCP config may be chosen from.
 	MCPConfigs []string
 }
@@ -52,9 +52,6 @@ func (e ConfigEdit) validate() (v1alpha1.KiroCrewConfigSpec, error) {
 	}
 	var err error
 	if spec.Gateway.Image, err = cleanImage("gateway image", e.GatewayImage); err != nil {
-		return spec, err
-	}
-	if spec.Tailscale.Image, err = cleanImage("tailscale image", e.TailscaleImage); err != nil {
 		return spec, err
 	}
 	spec.MCPConfigRef = strings.TrimSpace(e.MCPConfigRef)

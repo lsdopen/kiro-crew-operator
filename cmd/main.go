@@ -183,10 +183,9 @@ func main() {
 	}
 
 	if err := (&controller.KiroCrewReconciler{
-		Client:        mgr.GetClient(),
-		Scheme:        mgr.GetScheme(),
-		Clientset:     kubeClientset,
-		TailnetDomain: os.Getenv("TAILNET_DOMAIN"),
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Clientset: kubeClientset,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "kirocrew")
 		os.Exit(1)

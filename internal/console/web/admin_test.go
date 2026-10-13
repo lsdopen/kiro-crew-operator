@@ -196,7 +196,7 @@ func TestConfigEditorSavesAndValidates(t *testing.T) {
 	}
 	got := e.config().Spec
 	if len(got.AllowedSizes) != 2 || got.DefaultSize != v1alpha1.SizeMini || got.Gateway.Image != gatewayV1 ||
-		got.Tailscale.Image != "" || got.MCPConfigRef != "shared-mcp" {
+		got.MCPConfigRef != "shared-mcp" {
 		t.Fatalf("spec = %+v", got)
 	}
 	for name, form := range map[string]url.Values{
