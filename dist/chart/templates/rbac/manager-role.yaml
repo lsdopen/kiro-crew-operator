@@ -59,6 +59,15 @@ rules:
 - apiGroups:
   - kirocrew.lsdopen.io
   resources:
+  - kirocrewaccounts
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kirocrew.lsdopen.io
+  resources:
+  - kirocrewrequests
   - kirocrews
   verbs:
   - create
@@ -71,12 +80,13 @@ rules:
 - apiGroups:
   - kirocrew.lsdopen.io
   resources:
-  - kirocrews/finalizers
+  - kirocrewrequests/finalizers
   verbs:
   - update
 - apiGroups:
   - kirocrew.lsdopen.io
   resources:
+  - kirocrewrequests/status
   - kirocrews/status
   verbs:
   - get

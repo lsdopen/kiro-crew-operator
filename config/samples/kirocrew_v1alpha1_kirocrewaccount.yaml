@@ -1,0 +1,17 @@
+apiVersion: kirocrew.lsdopen.io/v1alpha1
+kind: KiroCrewAccount
+metadata:
+  name: someone
+spec:
+  email: someone@example.com
+  role: user
+  manager: boss@example.com
+  displayName: Some One
+---
+apiVersion: kirocrew.lsdopen.io/v1alpha1
+kind: KiroCrewAccount
+metadata:
+  name: boss
+spec:
+  email: boss@example.com
+  role: manager

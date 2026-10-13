@@ -22,4 +22,20 @@ resources:
   kind: KiroCrew
   path: github.com/lsdopen/kiro-crew-operator/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+  domain: lsdopen.io
+  group: kirocrew
+  kind: KiroCrewAccount
+  path: github.com/lsdopen/kiro-crew-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: lsdopen.io
+  group: kirocrew
+  kind: KiroCrewRequest
+  path: github.com/lsdopen/kiro-crew-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"
