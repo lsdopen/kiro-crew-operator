@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.6](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.5...v0.2.6) (2026-10-13)
+
+
+### Features
+
+* console phase 3b (requests and approvals) ([#60](https://github.com/lsdopen/kiro-crew-operator/issues/60)) ([8985bc3](https://github.com/lsdopen/kiro-crew-operator/commit/8985bc3a51c2a9040722fedeca46d289e61bd878))
+* management console phase 3a (login and read-only views) ([#57](https://github.com/lsdopen/kiro-crew-operator/issues/57)) ([b412872](https://github.com/lsdopen/kiro-crew-operator/commit/b4128720fed3bddc643e81d82913a99d22c0dd9d))
+
+
+### Dependencies
+
+* bump github.com/go-jose/go-jose/v4 from 4.1.4 to 4.1.5 ([#58](https://github.com/lsdopen/kiro-crew-operator/issues/58)) ([001991e](https://github.com/lsdopen/kiro-crew-operator/commit/001991e3f398fa34e52a2f528e8378fc10166fde))
+* bump github.com/onsi/ginkgo/v2 from 2.33.0 to 2.33.1 ([#49](https://github.com/lsdopen/kiro-crew-operator/issues/49)) ([09db40c](https://github.com/lsdopen/kiro-crew-operator/commit/09db40c6c8316e340f99ada2e503454ad139b6e4))
+
 ## [0.2.5](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.4...v0.2.5) (2026-10-13)
 
 
