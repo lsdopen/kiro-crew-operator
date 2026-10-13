@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -72,6 +73,18 @@ func (r *KiroCrewRequestReconciler) evaluate(ctx context.Context, request *kiroc
 	if requester == nil {
 		setInvalid(request, kirocrewv1alpha1.ReasonUnknownRequester,
 			fmt.Sprintf("No KiroCrewAccount for %s", request.Spec.Requester))
+		return nil
+	}
+
+	cfg, err := loadConfigSpec(ctx, r.Client)
+	if err != nil {
+		return err
+	}
+	// A denial provisions nothing, so a later change to allowedSizes must not invalidate it.
+	denied := request.Spec.Decision != nil && request.Spec.Decision.Verdict == kirocrewv1alpha1.VerdictDenied
+	if allowed, _ := cfg.Sizes(); !denied && !slices.Contains(allowed, request.Spec.Size) {
+		setInvalid(request, kirocrewv1alpha1.ReasonSizeNotAllowed,
+			fmt.Sprintf("Size %s is not in KiroCrewConfig allowedSizes", request.Spec.Size))
 		return nil
 	}
 
@@ -210,11 +223,28 @@ func (r *KiroCrewRequestReconciler) requestsForAccount(ctx context.Context, obj 
 	return out
 }
 
+// requestsForConfig re-queues unfinished requests, so narrowing allowedSizes
+// takes effect and widening it recovers requests marked Invalid for their size.
+func (r *KiroCrewRequestReconciler) requestsForConfig(ctx context.Context, _ client.Object) []reconcile.Request {
+	requests := &kirocrewv1alpha1.KiroCrewRequestList{}
+	if err := r.List(ctx, requests); err != nil {
+		return nil
+	}
+	var out []reconcile.Request
+	for i := range requests.Items {
+		if requests.Items[i].Status.Phase != kirocrewv1alpha1.PhaseProvisioned {
+			out = append(out, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&requests.Items[i])})
+		}
+	}
+	return out
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *KiroCrewRequestReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kirocrewv1alpha1.KiroCrewRequest{}).
 		Watches(&kirocrewv1alpha1.KiroCrewAccount{}, handler.EnqueueRequestsFromMapFunc(r.requestsForAccount)).
+		Watches(&kirocrewv1alpha1.KiroCrewConfig{}, handler.EnqueueRequestsFromMapFunc(r.requestsForConfig)).
 		Named("kirocrewrequest").
 		Complete(r)
 }

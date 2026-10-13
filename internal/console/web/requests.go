@@ -20,7 +20,7 @@ func (s *Server) createRequest(w http.ResponseWriter, r *http.Request, sess *aut
 		s.writeFailed(w, r, err)
 		return
 	}
-	s.done(w, r, sess, acct, "Request submitted.")
+	s.done(w, r, sess, acct, "requests", "Request submitted.")
 }
 
 // decideRequest reads only the verdict from the form: decision.by is the session email.
@@ -30,7 +30,7 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, sess *aut
 		s.writeFailed(w, r, err)
 		return
 	}
-	s.done(w, r, sess, acct, "Decision recorded.")
+	s.done(w, r, sess, acct, "requests", "Decision recorded.")
 }
 
 func (s *Server) cancelRequest(w http.ResponseWriter, r *http.Request, sess *auth.Session, acct *v1alpha1.KiroCrewAccount) {
@@ -38,17 +38,17 @@ func (s *Server) cancelRequest(w http.ResponseWriter, r *http.Request, sess *aut
 		s.writeFailed(w, r, err)
 		return
 	}
-	s.done(w, r, sess, acct, "Request cancelled.")
+	s.done(w, r, sess, acct, "requests", "Request cancelled.")
 }
 
-// done answers a successful write: the refreshed requests view for htmx, or a
-// redirect back to it.
-func (s *Server) done(w http.ResponseWriter, r *http.Request, sess *auth.Session, acct *v1alpha1.KiroCrewAccount, notice string) {
+// done answers a successful write: the refreshed view for htmx, or a redirect
+// back to it.
+func (s *Server) done(w http.ResponseWriter, r *http.Request, sess *auth.Session, acct *v1alpha1.KiroCrewAccount, active, notice string) {
 	if !isHTMX(r) {
-		http.Redirect(w, r, "/requests", http.StatusSeeOther)
+		http.Redirect(w, r, "/"+active, http.StatusSeeOther)
 		return
 	}
-	s.render(w, r, sess, acct, "requests", notice)
+	s.render(w, r, sess, acct, active, notice)
 }
 
 func (s *Server) writeFailed(w http.ResponseWriter, r *http.Request, err error) {
@@ -58,9 +58,9 @@ func (s *Server) writeFailed(w http.ResponseWriter, r *http.Request, err error) 
 		s.fail(w, r, http.StatusBadRequest, invalid.Msg)
 	case errors.Is(err, authz.ErrForbidden):
 		s.fail(w, r, http.StatusForbidden, "forbidden")
-	case errors.Is(err, authz.ErrNotFound):
-		s.fail(w, r, http.StatusNotFound, "request not found")
-	case errors.Is(err, authz.ErrNotPending), errors.Is(err, authz.ErrConflict),
+	case errors.Is(err, authz.ErrNotFound), errors.Is(err, authz.ErrAccountNotFound), errors.Is(err, authz.ErrConfigNotFound):
+		s.fail(w, r, http.StatusNotFound, err.Error())
+	case errors.Is(err, authz.ErrNotPending), errors.Is(err, authz.ErrConflict), errors.Is(err, authz.ErrLastAdmin),
 		errors.Is(err, authz.ErrOpenRequest), errors.Is(err, authz.ErrHasCrew):
 		s.fail(w, r, http.StatusConflict, err.Error())
 	case errors.Is(err, authz.ErrNoNamespace):

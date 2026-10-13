@@ -99,14 +99,14 @@ Published tags:
 
 | Tag | Meaning |
 |-----|---------|
-| `latest` | What `spec.gateway.image` defaults to |
+| `latest` | Moves with every publish; not used as a default |
 | `kirocrew-<version>` | The upstream KiroCrew release it carries, read from the base image's own label rather than maintained by hand |
 | `sha-<commit>` | The exact commit of this repo that built it |
 
-The operator defaults to `latest` deliberately: pinning it to a fixed gateway
-version would force an operator release for every upstream bump, which is the
-coupling this split exists to avoid. Set `spec.gateway.image` to a
-`kirocrew-<version>` tag on an instance that needs a frozen runtime.
+The operator defaults to a precise `kirocrew-<version>` tag, never `latest`, so a
+crew's runtime changes only through a reviewed commit. Admins can roll the fleet
+without an operator release by setting `gateway.image` in the `KiroCrewConfig`,
+or per crew with `spec.gateway.image`.
 
 ## Two one-time human approvals
 

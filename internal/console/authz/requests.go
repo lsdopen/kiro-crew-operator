@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -129,6 +130,13 @@ func (s *Store) CreateRequest(ctx context.Context, me *v1alpha1.KiroCrewAccount,
 	size, schedule, err := in.Validate()
 	if err != nil {
 		return nil, err
+	}
+	cfg, err := s.configSpec(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if allowed, _ := cfg.Sizes(); !slices.Contains(allowed, size) {
+		return nil, &InvalidError{"size is not allowed"}
 	}
 	ns := client.InNamespace(s.CrewNamespace)
 	var reqs v1alpha1.KiroCrewRequestList

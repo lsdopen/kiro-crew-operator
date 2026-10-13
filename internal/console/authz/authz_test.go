@@ -2,6 +2,7 @@ package authz
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -274,5 +275,17 @@ func TestUserWhoClaimsToManageDoesNotGainReports(t *testing.T) {
 	}
 	if len(v.Crews) != 0 {
 		t.Fatalf("user saw %d crews", len(v.Crews))
+	}
+}
+
+func TestDeleteAccountRefusesSelf(t *testing.T) {
+	root, other := account("root@example.com", v1alpha1.RoleAdmin, ""), account("other@example.com", v1alpha1.RoleAdmin, "")
+	s, c := newStore(t, root, other)
+	var invalid *InvalidError
+	if err := s.DeleteAccount(context.Background(), root, root.Name); !errors.As(err, &invalid) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(countAccounts(t, c)) != 2 {
+		t.Fatal("account was deleted")
 	}
 }

@@ -187,6 +187,11 @@ func seed(ctx context.Context, c client.Client) error {
 		}
 	}
 
+	cfg := &v1alpha1.KiroCrewConfig{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ConfigName}}
+	if err := c.Create(ctx, cfg); err != nil {
+		return err
+	}
+
 	now := metav1.Now()
 	next := metav1.NewTime(now.Add(10 * time.Hour))
 	weekdays := &v1alpha1.ScheduleSpec{Up: "0 8 * * 1-5", Down: "0 18 * * 1-5", Timezone: "Africa/Johannesburg"}

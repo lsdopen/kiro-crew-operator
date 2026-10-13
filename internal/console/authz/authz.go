@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,6 +28,8 @@ type Store struct {
 	Live client.Reader
 	// CrewNamespace holds KiroCrews and KiroCrewRequests.
 	CrewNamespace string
+
+	adminMu sync.Mutex
 }
 
 // FindAccount returns the account for email, matched case-insensitively like the
@@ -119,6 +122,8 @@ type View struct {
 	Decidable map[string]bool
 	// Controllable names the crews Me may start or stop, by CanControl.
 	Controllable map[string]bool
+	// Config is the product config; the zero value means compiled defaults.
+	Config v1alpha1.KiroCrewConfigSpec
 }
 
 // Visible lists what me may see: users their own, managers also their reports',
@@ -138,7 +143,11 @@ func (s *Store) Visible(ctx context.Context, me *v1alpha1.KiroCrewAccount) (*Vie
 		return nil, fmt.Errorf("listing requests: %w", err)
 	}
 
-	v := &View{Me: me}
+	cfg, err := s.configSpec(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v := &View{Me: me, Config: cfg}
 	if me.Spec.Role == v1alpha1.RoleAdmin {
 		v.Crews, v.Requests, v.Accounts = crews.Items, reqs.Items, accounts.Items
 		return v.markDecidable(accounts.Items), nil

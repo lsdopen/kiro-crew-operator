@@ -5,6 +5,7 @@ resources:
 - bases/kirocrew.lsdopen.io_kirocrews.yaml
 - bases/kirocrew.lsdopen.io_kirocrewaccounts.yaml
 - bases/kirocrew.lsdopen.io_kirocrewrequests.yaml
+- bases/kirocrew.lsdopen.io_kirocrewconfigs.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

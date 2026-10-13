@@ -20,6 +20,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	kirocrewv1alpha1 "github.com/lsdopen/kiro-crew-operator/api/v1alpha1"
@@ -79,8 +80,8 @@ const (
 	// runtimes, and the MCP ecosystem is distributed almost entirely as uvx and
 	// npx commands — so on the stock image a crew's MCP servers cannot start.
 	// Override spec.gateway.image to run upstream's image directly instead.
-	defaultGatewayImage   = "ghcr.io/lsdopen/kiro-crew-gateway:latest"
-	defaultTailscaleImage = "ghcr.io/tailscale/tailscale:stable"
+	defaultGatewayImage   = "ghcr.io/lsdopen/kiro-crew-gateway:kirocrew-0.8.0"
+	defaultTailscaleImage = "ghcr.io/tailscale/tailscale:v1.102.5"
 
 	// gatewayHealthPath is upstream's health endpoint, used by its own
 	// HEALTHCHECK. It is not /healthz.
@@ -357,14 +358,13 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 	resources, storage := resolveSize(crew)
 	labels := labelsFor(crew)
 
-	gatewayImage := crew.Spec.Gateway.Image
-	if gatewayImage == "" {
-		gatewayImage = defaultGatewayImage
+	cfg, err := loadConfigSpec(ctx, r.Client)
+	if err != nil {
+		return fmt.Errorf("reading KiroCrewConfig: %w", err)
 	}
-	tailscaleImage := crew.Spec.Tailscale.Image
-	if tailscaleImage == "" {
-		tailscaleImage = defaultTailscaleImage
-	}
+	gatewayImage := firstNonEmpty(crew.Spec.Gateway.Image, cfg.Gateway.Image, defaultGatewayImage)
+	tailscaleImage := firstNonEmpty(crew.Spec.Tailscale.Image, cfg.Tailscale.Image, defaultTailscaleImage)
+	mcpConfigRef := firstNonEmpty(crew.Spec.MCPConfigRef, cfg.MCPConfigRef)
 	hostname := crew.Spec.Tailscale.Hostname
 	if hostname == "" {
 		hostname = instanceName(crew)
@@ -377,7 +377,7 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 		},
 	}
 
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, sts, func() error {
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, sts, func() error {
 		sts.Labels = labels
 		runAsNonRoot := true
 		gatewayUID := gatewayUIDValue
@@ -423,7 +423,7 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 			{Name: dataVolumeName, MountPath: dataMountPath},
 			{Name: tailscaleSocketVolume, MountPath: tailscaleSocketDir},
 		}
-		if crew.Spec.MCPConfigRef != "" {
+		if mcpConfigRef != "" {
 			gatewayMounts = append(gatewayMounts, corev1.VolumeMount{
 				Name:      "mcp-config",
 				MountPath: mcpConfigMountPath,
@@ -577,13 +577,13 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 				},
 			},
 		}
-		if crew.Spec.MCPConfigRef != "" {
+		if mcpConfigRef != "" {
 			volumes = append(volumes, corev1.Volume{
 				Name: "mcp-config",
 				VolumeSource: corev1.VolumeSource{
 					ConfigMap: &corev1.ConfigMapVolumeSource{
 						LocalObjectReference: corev1.LocalObjectReference{
-							Name: crew.Spec.MCPConfigRef,
+							Name: mcpConfigRef,
 						},
 					},
 				},
@@ -787,6 +787,17 @@ func (r *KiroCrewReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&networkingv1.NetworkPolicy{}).
+		Watches(&kirocrewv1alpha1.KiroCrewConfig{}, handler.EnqueueRequestsFromMapFunc(r.crewsForConfig)).
 		Named("kirocrew").
 		Complete(r)
+}
+
+// firstNonEmpty returns the first non-empty string, or "" if there is none.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
