@@ -4,47 +4,18 @@ Status: proposed. Scope: a web console for requesting, approving, starting,
 stopping and opening Kiro Crews, with Google Workspace SSO. No implementation
 lands with this document.
 
-## Decisions needed
+## Decisions
 
-Only what is still open. Each has a recommended answer; everything else in this
-document is decided.
+All rulings are in. Everything else in this document is decided.
 
-1. **How does "Start" work outside a crew's schedule?** Today `spec.suspend`
-   only stops (`computeDesired` in `internal/controller/schedule.go` returns
-   replicas 0 for suspend, otherwise follows the schedule), so a user cannot
-   start a scheduled crew at 21:00. *Recommend:* add
-   `KiroCrewSpec.runUntil *metav1.Time`. "Start" sets `suspend=false` and
-   `runUntil` = the next schedule Down (or now+8h with no schedule).
-   `computeDesired` treats `now < runUntil` as up. "Stop" sets `suspend=true`;
-   "Resume schedule" clears both.
-2. **Accept sign-in brokering by `pods/exec` now (option a), and pursue the
-   upstream identity bootstrap (option b) in parallel to remove it later?**
-   The console ServiceAccount could then exec into every crew pod in the crew
-   namespace, narrowed by an admission policy to one command. *Recommend:* yes.
-3. **What does a Google user from an allowed domain with no `KiroCrewAccount`
-   see?** *Recommend:* a "no account, ask an admin" page and nothing else.
-   Do not self-register: the manager link is the approval boundary, and only
-   an admin should set it.
-4. **Who may write `spec.decision` outside the console?** *Recommend:* a
-   ValidatingAdmissionPolicy that allows changes to `spec.decision` only from
-   the console ServiceAccount plus a configurable break-glass group
-   (`console.decisionBreakGlassGroups`, default `[]`). That turns the
-   request controller's `canDecide` from a hint into a guarantee.
-5. **Should the chart docs recommend a private ingress as the default, with
-   public as the opt-in?** The console holds exec into every crew. Its
-   Ingress may be private (internal load balancer, VPN-only, private DNS) or
-   public; that is the operator's choice. *Recommend:* yes in the docs, not in
-   the chart defaults. The docs lead with the private example and present
-   public as an opt-in, with an IP allowlist or WAF suggested (not required).
-   A private console costs users little, since opening a crew already needs
-   the tailnet. The chart itself stays exposure-neutral (`ingress.enabled:
-   false`, empty `className` and `annotations`), because it cannot know a
-   cluster's controllers or load balancer scheme. SSO stays the only
-   *authentication* step either way, as decided, and the threat model assumes
-   neither a private network nor an allowlist.
-6. **Can users request on someone else's behalf?** *Recommend:* no.
-   `spec.requester` is always the session email. An admin who wants a crew
-   for someone creates the account and that person requests it.
+| # | Question | Ruling | Status |
+|---|---|---|---|
+| 1 | How does "Start" work outside a crew's schedule? | "Start" from the UI runs the crew until its next scheduled shutdown. Add `KiroCrewSpec.runUntil *metav1.Time` = the next schedule Down; `computeDesired` (`internal/controller/schedule.go`) treats `now < runUntil` as up. With no schedule a crew always runs, so Start just clears `suspend`. "Stop" sets `suspend=true`. | Accepted |
+| 2 | Sign-in brokering by `pods/exec`? | Yes. The console execs `kirocrew token`, limited to that one command (see [Narrowing (a)](#narrowing-a)). The upstream gateway identity bootstrap (option b) is pursued in parallel to remove the exec. | Accepted |
+| 3 | What happens on a first login from an allowed domain with no `KiroCrewAccount`? | Self sign-up is allowed. The console creates a `KiroCrewAccount` with role `user` and no manager. Until an admin sets a manager, only admins can approve that user's requests. `auth.allowedDomains` is now the only boundary on who gets an account (see the [threat model](#threat-model)). Admins can still edit roles and managers. | Changed |
+| 4 | Who may write `spec.decision` outside the console? | No ValidatingAdmissionPolicy and no break-glass group for now. Cluster admins can approve through the Kubernetes API. Residual risk: anyone with update or patch on `kirocrewrequests` can forge `decision.by`, so chart RBAC grants that only to the console ServiceAccount, and the controller's `canDecide` check stays defence in depth. Future option: a ValidatingAdmissionPolicy that allows `spec.decision` changes only from the console ServiceAccount plus a configurable break-glass group. | Deferred |
+| 5 | Should the chart docs recommend a private ingress, with public as the opt-in? | Yes, in the docs, not in the chart defaults. The docs lead with the private example and present public as an opt-in. The chart stays exposure-neutral (`ingress.enabled: false`, empty `className` and `annotations`). SSO stays the only *authentication* step either way, and the threat model assumes neither a private network nor an allowlist. | Accepted |
+| 6 | Can users request on someone else's behalf? | No. `spec.requester` is always the session email. | Accepted |
 
 Flagged on the decisions already made:
 
@@ -92,22 +63,28 @@ No impersonation.**
 
 | Option | Wins on | Loses on |
 |---|---|---|
-| SA + code checks | Expresses "manager of the requester" and "owner of this crew", which are relations between CR fields. Needs no per-person RBAC objects. | The console code is the enforcement point, so it needs tests and admission backstops. |
+| SA + code checks | Expresses "manager of the requester" and "owner of this crew", which are relations between CR fields. Needs no per-person RBAC objects. | The console code is the enforcement point, so it needs tests. The controller's `canDecide` stays as defence in depth (Decision 4). |
 | Impersonation | The API server enforces every call | RBAC cannot say "requests whose `requester`'s account names me as manager". You would need a generated RoleBinding per person with `resourceNames`, a controller to keep them in sync, and `impersonate` on users, which is a stronger grant than everything it replaces. |
 
 Every request resolves `session.email` to a KiroCrewAccount (case-insensitive,
 like `findAccount`) from the informer cache. Role is re-read on every request,
-so deleting or demoting an account takes effect immediately.
+so demoting an account takes effect immediately.
+
+Sign-up (Decision 3): a first login from an allowed domain with no account
+creates one with role `user` and no manager. The console sets both and never
+reads them from input. Until an admin sets a manager, only admins can approve
+that user's requests, so the request form says "No manager set: an admin must
+approve" and the request waits for an admin. Admins can edit roles and managers.
 
 | Action | user | manager | admin | Code check |
 |---|---|---|---|---|
 | View own crew + request | ✓ | ✓ | ✓ | `crew.spec.owner == me` |
-| Create request | self | self | self | `requester := me`, no open request, no crew (`crewName(me)` free) |
-| Approve / deny | – | reports | all | same rule as `canDecide`; `decision.by := me` |
-| Start / stop crew | own | own + reports | all | owner, or owner's `account.manager == me`, or admin |
+| Create request | self | self | self | `requester := me` (never on someone else's behalf, Decision 6), no open request, no crew (`crewName(me)` free) |
+| Approve / deny | – | reports | all | same rule as `canDecide`; `decision.by := me`. A user with no manager has admins as the only approvers. |
+| Start / stop crew | own | own + reports | all | owner, or owner's `account.manager == me`, or admin. Start sets `suspend=false` and `runUntil`; Stop sets `suspend=true` (Decision 1). |
 | Open dashboard (sign-in) | own | own | own | `crew.spec.owner == me` **only**. Managers and admins cannot broker into someone else's crew. |
 | See `status.tailnetLoginURL` | own | own | own | as above. It is a one-time node-auth URL. |
-| Accounts CRUD | – | – | ✓ | cannot delete self or demote the last admin |
+| Accounts CRUD (roles, managers) | – | – | ✓ | cannot delete self or demote the last admin |
 | Global config | – | – | ✓ | |
 
 `decision.by` and `requester` are never read from form input. Handlers take
@@ -123,7 +100,8 @@ MUST hold only crew pods, because `pods/exec` below is namespace-wide.
 | Scope | Resource | Verbs | Phase |
 |---|---|---|---|
 | ClusterRole | `kirocrewaccounts` | get, list, watch | 3a |
-| ClusterRole | `kirocrewaccounts` | create, update, patch, delete | 3d |
+| ClusterRole | `kirocrewaccounts` | create (first-login sign-up, role `user` enforced in code) | 3a |
+| ClusterRole | `kirocrewaccounts` | update, patch, delete | 3d |
 | ClusterRole | `kirocrewconfigs` | get, list, watch | 3a |
 | ClusterRole | `kirocrewconfigs` (resourceNames: `default`) | update, patch | 3d |
 | Role (crewNamespace) | `kirocrews` | get, list, watch | 3a |
@@ -134,12 +112,15 @@ MUST hold only crew pods, because `pods/exec` below is namespace-wide.
 | Role (crewNamespace) | `pods/exec` | create (+ get for the WebSocket upgrade on API servers that authorize it as get) | 3c |
 
 No Secrets, no `pods/log`, no StatefulSets, no `impersonate`, no `escalate`.
+The chart grants no other subject update or patch on `kirocrewrequests`
+(Decision 4); that is what keeps `decision.by` unforgeable without an
+admission policy.
 
 ## Sign-in brokering (the hard problem)
 
-**Choice: (a) now. The console execs `kirocrew token` server-side and
-303-redirects the owner straight to their crew. Pursue (b) upstream so (a) can
-be deleted later.**
+**Choice (Decision 2): (a) now. The console execs `kirocrew token`
+server-side, limited to that one command, and 303-redirects the owner straight
+to their crew. Pursue (b) upstream in parallel so (a) can be deleted later.**
 
 ### What the gateway actually does
 
@@ -178,7 +159,8 @@ to the console ServiceAccount, admits only:
 - `command == ["kirocrew","token","--ttl",<duration>]`,
 - `stdin == false`, `tty == false`.
 
-Anything else is denied. A compromised console can then mint sign-in links,
+This policy is separate from the deferred decision-write policy (Decision 4)
+and stays. Anything else is denied. A compromised console can then mint sign-in links,
 which redeem only from the owner's own device. It cannot get a shell.
 VAP supports `CONNECT`; 3c verifies it on the target cluster version before
 granting `pods/exec`.
@@ -221,9 +203,9 @@ console links `dashboardURL` directly.
 | Flow | OIDC authorization code with PKCE (S256) against the provider's discovery doc. Google is the only implemented provider. |
 | Request | `scope=openid email profile`, random `state` and `nonce`. `hd=` is sent only as a UI hint when exactly one domain is configured. It is never trusted. |
 | Transient cookie | `__Host-kc_oauth`: sealed (`state`, `nonce`, PKCE verifier, return path), 10 min, Secure, HttpOnly, SameSite=Lax. Lax is required because the callback is a cross-site top-level GET from the provider. |
-| ID token checks | Signature via JWKS, `iss`, `aud == clientID`, `exp`, `nonce`, `email_verified == true`, `hd ∈ auth.allowedDomains`, and `email` ends `@`+`hd`. A missing `hd` (consumer Gmail) is refused. **An empty `allowedDomains` refuses every login.** The console also refuses to start with an empty list unless `auth.allowEmptyDomains` is set for testing, so the misconfiguration is loud. |
+| ID token checks | Signature via JWKS, `iss`, `aud == clientID`, `exp`, `nonce`, `email_verified == true`, `hd ∈ auth.allowedDomains`, and `email` ends `@`+`hd`. A missing `hd` (consumer Gmail) is refused. `allowedDomains` is the only boundary on who gets an account (Decision 3). **An empty `allowedDomains` refuses every login.** The console also refuses to start with an empty list unless `auth.allowEmptyDomains` is set for testing, so the misconfiguration is loud. |
 | Session cookie | `__Host-kc_session`: AES-GCM sealed `{email, iat, exp, sid}`, Secure, HttpOnly, SameSite=Lax, Path=/. Absolute expiry 8h, idle 1h (sliding re-seal). No server store. |
-| Revocation | Role and account are re-read per request, so deleting the account revokes it. Rotating `cookieKey` logs out everyone. |
+| Revocation | Role is re-read per request, so demoting takes effect immediately. With self sign-up, deleting an account no longer revokes sign-in: the next login recreates it as `user` with no manager. Blocking a person means removing their domain from `allowedDomains` or their Workspace account. Rotating `cookieKey` logs out everyone. |
 | CSRF | Every unsafe method needs `X-CSRF-Token` (htmx `hx-headers` from a `<meta>`) or a form field equal to `HMAC(cookieKey, sid)`. Also Go's `http.CrossOriginProtection` (Origin / `Sec-Fetch-Site`). |
 | Headers | CSP `default-src 'self'; frame-ancestors 'none'`, HSTS, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` on authed pages |
 | Rate limits | Per client IP on `/auth/*` (from `X-Forwarded-For`, trusted only from `console.trustedProxies` CIDRs), per session on writes and `/open`. Ingress annotations can add more. |
@@ -236,7 +218,7 @@ Two homes, split by plane and blast radius:
 
 | Where | What | Why |
 |---|---|---|
-| **Chart values** (deployment plane) | `console.auth.allowedDomains`, `auth.provider`, `auth.issuerURL`, `auth.redirectURL`, `auth.existingSecret`, `crewNamespace`, `trustedProxies`, ingress | Login policy must exist before any admin can sign in, so it cannot bootstrap from a CR the console edits. It is also an authentication boundary: if it lived in a CR, one compromised admin session could widen login to any domain. Changing it is a reviewed `helm upgrade`. |
+| **Chart values** (deployment plane) | `console.auth.allowedDomains`, `auth.provider`, `auth.issuerURL`, `auth.redirectURL`, `auth.existingSecret`, `crewNamespace`, `trustedProxies`, ingress | Login policy must exist before any admin can sign in, so it cannot bootstrap from a CR the console edits. It is also the authentication and account-creation boundary (Decision 3): if it lived in a CR, one compromised admin session could widen sign-up to any domain. Changing it is a reviewed `helm upgrade`. |
 | **`KiroCrewConfig`** (cluster-scoped singleton, name `default`, enforced by CEL `self.metadata.name == 'default'`) | Product defaults admins tune day to day | Read by both the console and the operator. Edited in the console in 3d. |
 
 `KiroCrewConfig.spec`:
@@ -250,7 +232,6 @@ Two homes, split by plane and blast radius:
 | `tailscale.image` | string | compiled `defaultTailscaleImage` | crew controller, live |
 | `mcpConfigRef` | string | "" | crew controller, when `KiroCrew.spec.mcpConfigRef` is empty |
 | `signIn.sessionTTL` | `metav1.Duration` | 8h, max 20h | broker's `--ttl` |
-| `runUntilDefault` | `metav1.Duration` | 8h | "Start" with no schedule (Decision 1) |
 
 Precedence: `KiroCrew.spec` > `KiroCrewConfig` > compiled default. Size and
 schedule are snapshotted into the KiroCrew when the request is provisioned.
@@ -265,7 +246,6 @@ console:
   image: {repository: ghcr.io/example-org/kiro-crew-console, tag: "", pullPolicy: IfNotPresent}
   crewNamespace: kiro-crews
   trustedProxies: []            # CIDRs of the ingress controller
-  decisionBreakGlassGroups: []  # Decision 4
   auth:
     provider: google
     issuerURL: https://accounts.google.com
@@ -283,8 +263,9 @@ console:
   resources: {requests: {cpu: 10m, memory: 64Mi}, limits: {memory: 128Mi}}
 ```
 
-Exposure is the operator's choice: the console's Ingress, private or public,
-is set entirely by `ingress.className` and `ingress.annotations`. The Google
+Exposure is the operator's choice (Decision 5): the console's Ingress, private
+or public, is set entirely by `ingress.className` and `ingress.annotations`.
+The docs recommend private and present public as the opt-in. The Google
 callback is a browser redirect, so a private host works; the console Pod needs
 egress to the provider's discovery and JWKS endpoints either way.
 
@@ -341,23 +322,24 @@ the authentication step regardless.
 
 | Threat | Mitigation |
 |---|---|
-| Login from outside the org | `hd` ∈ allowlist, `email_verified`, email matches `hd`; fail closed on an empty list; no account means no access |
+| Login from outside the org | `hd` ∈ allowlist, `email_verified`, email matches `hd`; fail closed on an empty list |
+| Account creation by anyone in an allowed domain | Self sign-up (Decision 3) makes `auth.allowedDomains` the only boundary on who gets an account, so it lives in chart values (a reviewed `helm upgrade`), not a CR. A new account is role `user` with no manager (set in code, not from input), can only request a crew, and only admins can approve it until a manager is set. Nothing is provisioned before approval. |
 | Forged or replayed ID token | go-oidc signature, `aud`, `iss`, `exp` and `nonce` checks; PKCE; single-use `state` bound to the transient cookie |
 | Session theft | `__Host-` sealed cookie, Secure, HttpOnly, SameSite=Lax; 8h absolute and 1h idle; TLS only (HSTS) |
 | CSRF (approve, start, open) | Synchronizer token + `CrossOriginProtection`; SameSite=Lax; all state changes are POST |
-| Privilege escalation by form tampering | `requester` and `decision.by` come from the session; role is re-read from the CR per request; a VAP rejects `spec.decision` writes from anyone except the console SA or break-glass (Decision 4) |
-| Manager approves a non-report | Code check plus the operator's `canDecide` (marks the request `Invalid`) |
+| Privilege escalation by form tampering | `requester` and `decision.by` come from the session; role is re-read from the CR per request. Residual risk (Decision 4, no admission policy for now): anyone with update or patch on `kirocrewrequests` can forge `decision.by`, so chart RBAC grants that only to the console SA, cluster admins can approve through the Kubernetes API, and the controller's `canDecide` stays defence in depth. |
+| Manager approves a non-report | Code check plus the operator's `canDecide` (marks the request `Invalid`). A user with no manager has no manager-approver; only admins can approve. |
 | Sign-in token leak | Only in one `Location` header to the verified owner; never logged or stored; 5 min, single-use, and redeemable only via the owner's tailnet identity |
 | Console compromise | VAP limits exec to `kirocrew token`; no Secrets access; crews stay tailnet-gated, so a minted link is useless to an attacker who is not the owner |
 | Brute force / DoS on the console's Ingress, private or public | Per-IP limits on `/auth/*`, per-session limits on writes and `/open`, ingress-level limits via annotations, 2 stateless replicas |
 | Ingress header spoofing | `X-Forwarded-For` trusted only from `trustedProxies`; NetworkPolicy admits only the ingress controller |
-| SSO is the single factor | Accepted (Decision 5). Workspace-level MFA and, optionally, a private ingress or an ingress allowlist are the layers above it. |
+| SSO is the single factor | Accepted (Decision 5). Workspace-level MFA is the layer above it; a private ingress is recommended in the docs and an ingress allowlist is optional. |
 
 ## Build plan
 
 | Phase | Delivers | RBAC added | Exit test |
 |---|---|---|---|
-| **3a** login + read-only | OIDC login, sessions, CSRF scaffold, account resolution, read-only views of own crew / requests (user), reports' (manager), all (admin); crew card with `dashboardURL` link and owner-only `tailnetLoginURL`; image, chart, ingress, release step; `KiroCrewConfig` CRD (read-only) | accounts/configs/crews/requests read | envtest + httptest: empty-domain refusal, wrong `hd`, missing `email_verified`, no-account page, role views |
-| **3b** requests + approvals | Request form (`allowedSizes`, defaults), approve/deny with `decision.by` from session; decision VAP; request controller honours `allowedSizes` | requests create, patch | posted `by=`/`requester=` ignored; non-manager approval → 403; VAP denies a kubectl decision by a non-break-glass user |
+| **3a** login + read-only | OIDC login, sessions, CSRF scaffold, account resolution with first-login sign-up (role `user`, no manager), read-only views of own crew / requests (user), reports' (manager), all (admin); crew card with `dashboardURL` link and owner-only `tailnetLoginURL`; image, chart, ingress, release step; `KiroCrewConfig` CRD (read-only) | accounts create + read, configs/crews/requests read | envtest + httptest: empty-domain refusal, wrong `hd`, missing `email_verified`, first login creates a `user` account with no manager, role views |
+| **3b** requests + approvals | Request form (`allowedSizes`, defaults), approve/deny with `decision.by` from session (no admission policy, Decision 4); request controller honours `allowedSizes` | requests create, patch | posted `by=`/`requester=` ignored; non-manager approval → 403; a no-manager user's request is approvable only by an admin |
 | **3c** start/stop + sign-in | `runUntil` field + `computeDesired` change (Decision 1); start/stop; broker with exec VAP; re-verify gateway facts on the pinned image | crews patch, pods get, pods/exec | the token never appears in logs (captured logger); the VAP denies `sh`; non-owner `/open` → 403; a redirect host outside `tailnet.domain` → refused |
 | **3d** admin config | Accounts CRUD (last-admin guard), `KiroCrewConfig` editor; crew controller reads images and MCP ref from config | accounts write, config `default` write | demote-last-admin refused; config change rolls gateway image on the next reconcile |
