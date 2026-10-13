@@ -288,7 +288,7 @@ func TestConfigEditorKeepsTheMCPAllowlist(t *testing.T) {
 
 func TestResizeSelectKeepsCurrentSize(t *testing.T) {
 	all := []v1alpha1.Size{v1alpha1.SizeMini, v1alpha1.SizeLight, v1alpha1.SizeDevelopment, v1alpha1.SizePower}
-	const mini = "mini — 0.5 CPU · 8Gi RAM · 20Gi disk (current)"
+	const mini = "mini — 0.5 CPU · 8Gi RAM · 20Gi disk"
 	tests := []struct {
 		name    string
 		allowed []v1alpha1.Size

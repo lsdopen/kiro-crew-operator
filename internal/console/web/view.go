@@ -218,20 +218,20 @@ func sizeLabel(name string) string {
 }
 
 // resizeOptions lists the allowed sizes plus the crew's current one, which is
-// always shown and labelled; it is disabled only when the config no longer allows it.
+// always shown and selected; it is disabled only when the config no longer allows it.
 func resizeOptions(p Page, current string) []SizeOption {
 	var out []SizeOption
 	for _, name := range sizeNames() {
 		inList := slices.ContainsFunc(p.Sizes, func(o SizeOption) bool { return o.Name == name })
 		switch {
 		case name == current:
-			out = append(out, SizeOption{Name: name, Label: sizeLabel(name) + " (current)", Disabled: !inList})
+			out = append(out, SizeOption{Name: name, Label: sizeLabel(name), Disabled: !inList})
 		case inList:
 			out = append(out, SizeOption{Name: name, Label: sizeLabel(name)})
 		}
 	}
 	if current != "" && !slices.Contains(sizeNames(), current) {
-		out = append(out, SizeOption{Name: current, Label: current + " (current)", Disabled: true})
+		out = append(out, SizeOption{Name: current, Label: current, Disabled: true})
 	}
 	return out
 }
