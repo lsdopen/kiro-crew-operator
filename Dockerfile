@@ -1,6 +1,6 @@
 # Build the manager binary
 # Override BASE_IMAGE to build from another registry, e.g. docker.io/library/golang:1.26
-ARG BASE_IMAGE=golang:1.26
+ARG BASE_IMAGE=golang:1.26.9
 # --platform pins the builder to the machine doing the building, so a multi-arch
 # build cross-compiles with Go instead of running the whole toolchain under QEMU.
 # Without it, `go build -a` rebuilds the standard library emulated for every
@@ -30,7 +30,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 WORKDIR /
 COPY --from=builder /workspace/manager .
 USER 65532:65532
