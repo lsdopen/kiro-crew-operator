@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.4](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.3...v0.2.4) (2026-10-13)
+
+
+### Features
+
+* add suspend and schedule to KiroCrew ([#51](https://github.com/lsdopen/kiro-crew-operator/issues/51)) ([c39f4c2](https://github.com/lsdopen/kiro-crew-operator/commit/c39f4c2e0d01d1e4e62b9c98380894a96ceca029))
+
+
+### Dependencies
+
+* bump kirodotdev/kirocrew from 0.7.2 to 0.8.0 in /images/gateway ([#35](https://github.com/lsdopen/kiro-crew-operator/issues/35)) ([aabd543](https://github.com/lsdopen/kiro-crew-operator/commit/aabd5433aff04be0b7520101820037c53536d990))
+* bump sigs.k8s.io/controller-runtime from 0.25.1 to 0.25.2 ([#36](https://github.com/lsdopen/kiro-crew-operator/issues/36)) ([b3e5984](https://github.com/lsdopen/kiro-crew-operator/commit/b3e5984aa9f51e14f91d264d4ced1b0816f97ca9))
+
 ## [0.2.3](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.2...v0.2.3) (2026-10-13)
 
 
