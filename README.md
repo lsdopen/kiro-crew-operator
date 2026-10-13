@@ -78,8 +78,7 @@ to start, which makes `spec.mcpConfigRef` close to decorative. Set
 `tailscaled` is **not** added: KiroCrew's entrypoint owns PID 1, so this container
 cannot supervise a second daemon. The daemon stays in the sidecar.
 
-Each base is written `repo:tag@sha256:digest`. The digest is what builds, so a
-build is reproducible; the tag is what Dependabot follows. Every added binary is
+Each base is a precise semver tag (`repo:X.Y.Z`), which Dependabot follows. Every added binary is
 executed during the build (`uv --version`, `node --version`, `tailscale version`,
 …) so a changed upstream layout fails the build instead of shipping a subtly
 broken image.
@@ -88,8 +87,8 @@ broken image.
 
 The gateway image tracks **upstream KiroCrew**, not this operator's version, so
 the two have separate cadences and an operator `v*` tag publishes no gateway
-image. Dependabot watches the bases daily and opens a PR when upstream's `stable`
-digest moves; merging that PR to `main` republishes the image via
+image. Dependabot watches the bases daily and opens a PR when upstream's version
+tag moves; merging that PR to `main` republishes the image via
 [.github/workflows/release-gateway.yml](.github/workflows/release-gateway.yml).
 So a new upstream KiroCrew release reaches crews without an operator release and
 without anyone watching for it. A weekly schedule catches a tag that moved
