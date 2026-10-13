@@ -21,6 +21,19 @@ updates:
       - dependencies
       - gateway-image
 
+  # The console image's bases (golang builder, distroless runtime), pinned as
+  # `repo:tag@sha256:digest` in images/console/Containerfile.
+  - package-ecosystem: docker
+    directory: /images/console
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    labels:
+      - dependencies
+      - console-image
+
   # Workflow action pins. Every `uses:` here is pinned to a commit SHA, which is
   # correct for supply chain but goes stale silently without this.
   - package-ecosystem: github-actions

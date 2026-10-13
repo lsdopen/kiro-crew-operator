@@ -61,3 +61,23 @@ When disabled, serviceAccount.name must be set; use "default" to pick the namesp
 {{- required "serviceAccount.name is required when serviceAccount.enabled=false (set name: default explicitly to use the namespace default ServiceAccount)" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Console resource name and labels. The console is a second workload in this chart,
+so it gets its own component label to keep its selector apart from the manager's.
+*/}}
+{{- define "kiro-crew-operator.console.name" -}}
+{{- include "kiro-crew-operator.resourceName" (dict "suffix" "console" "context" .) }}
+{{- end }}
+
+{{- define "kiro-crew-operator.console.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "kiro-crew-operator.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: console
+{{- end }}
+
+{{- define "kiro-crew-operator.console.labels" -}}
+{{ include "kiro-crew-operator.console.selectorLabels" . }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+{{- end }}

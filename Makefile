@@ -48,8 +48,9 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
-generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+generate: controller-gen templ ## Generate DeepCopy methods and the console's templ components (committed, so go build needs no tools).
 	"$(CONTROLLER_GEN)" object paths="./..."
+	"$(TEMPL)" generate -path internal/console
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -111,6 +112,7 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
+	go build -o bin/console ./cmd/console
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -189,12 +191,15 @@ KUBECTL ?= kubectl
 KIND ?= kind
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
+TEMPL ?= $(LOCALBIN)/templ
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.8.1
 CONTROLLER_TOOLS_VERSION ?= v0.22.0
+# The generator must match the runtime library, so it follows go.mod.
+TEMPL_VERSION ?= $(call gomodver,github.com/a-h/templ)
 
 #ENVTEST_VERSION is the controller-runtime version to use for setup-envtest, derived from go.mod
 ENVTEST_VERSION ?= $(shell v='$(call gomodver,sigs.k8s.io/controller-runtime)'; \
@@ -216,6 +221,11 @@ $(KUSTOMIZE): $(LOCALBIN)
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
 $(CONTROLLER_GEN): $(LOCALBIN)
 	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
+
+.PHONY: templ
+templ: $(TEMPL) ## Download templ locally if necessary.
+$(TEMPL): $(LOCALBIN)
+	$(call go-install-tool,$(TEMPL),github.com/a-h/templ/cmd/templ,$(TEMPL_VERSION))
 
 .PHONY: setup-envtest
 setup-envtest: envtest ## Download the binaries required for ENVTEST in the local bin directory.

@@ -1,7 +1,7 @@
 name: Release
 
-# Publishes the operator image and chart for a version. It never relies on a
-# GITHUB_TOKEN-created event to trigger it, because such events deliberately do
+# Publishes the operator and console images and the chart for a version. It
+# never relies on a GITHUB_TOKEN-created event to trigger it, because such events deliberately do
 # NOT start new workflow runs (GitHub's recursion guard) — release-please tags
 # and releases with GITHUB_TOKEN, so a `release: published` or `push: tags`
 # trigger here would silently never fire for an automated release. Instead:
@@ -31,7 +31,7 @@ env:
 
 jobs:
   release:
-    name: Publish image and chart
+    name: Publish images and chart
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -90,6 +90,20 @@ jobs:
             ${{ env.REGISTRY }}/${{ github.repository }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build and push the console image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: images/console/Containerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/kiro-crew-console:${{ steps.version.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/kiro-crew-console:${{ steps.version.outputs.chart }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/kiro-crew-console:latest
+          cache-from: type=gha,scope=console
+          cache-to: type=gha,mode=max,scope=console
 
       - name: Install Helm
         run: make install-helm

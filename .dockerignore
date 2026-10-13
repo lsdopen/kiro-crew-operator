@@ -9,6 +9,9 @@
 !**/*.go
 **/*_test.go
 
+# Re-include assets embedded by the console (htmx, CSS)
+!internal/console/web/static/*
+
 # Re-include Go module files
 !go.mod
 !go.sum
