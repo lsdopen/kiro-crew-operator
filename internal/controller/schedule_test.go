@@ -174,6 +174,9 @@ func TestComputeDesiredStartedAt(t *testing.T) {
 		{"older than the last down is ignored", "2026-10-12T09:00:00Z", mondayEvening, 0, tuesdayUp},
 		{"same instant as a down loses the tie", eveningDown, eveningDown, 0, tuesdayUp},
 		{"ahead of the clock counts as now", "2026-10-12T19:00:05Z", mondayEvening, 1, tuesdayDown},
+		{"just inside the skew counts as now", "2026-10-12T19:05:00Z", mondayEvening, 1, tuesdayDown},
+		{"beyond the skew is ignored", "2026-10-12T19:05:01Z", mondayEvening, 0, tuesdayUp},
+		{"far future is ignored, so the schedule still stops it", "2099-01-01T00:00:00Z", mondayEvening, 0, tuesdayUp},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

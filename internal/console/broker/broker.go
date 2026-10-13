@@ -96,6 +96,9 @@ func DashboardHost(raw, tailnetDomain string) (string, error) {
 		u.Path != "" && u.Path != "/":
 		return "", ErrRefused
 	}
+	if !isASCII(u.Hostname()) {
+		return "", ErrRefused
+	}
 	host := strings.ToLower(u.Hostname())
 	if len(suffix) < 2 || !strings.HasSuffix(host, suffix) || len(host) == len(suffix) || strings.HasPrefix(host, ".") {
 		return "", ErrRefused
@@ -144,4 +147,13 @@ func podReady(p *corev1.Pod) bool {
 		}
 	}
 	return false
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
 }

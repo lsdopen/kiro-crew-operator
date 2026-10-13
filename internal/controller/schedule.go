@@ -12,6 +12,9 @@ import (
 // maxLookback bounds the search for the most recent fire of a cron expression.
 const maxLookback = 2 * 366 * 24 * time.Hour
 
+// maxStartSkew is how far ahead of this clock a startedAt may be and still count.
+const maxStartSkew = 5 * time.Minute
+
 // desiredState is what the schedule and suspend flag resolve to at a point in time.
 type desiredState struct {
 	Replicas int32
@@ -74,8 +77,11 @@ func inUpWindow(s *kirocrewv1alpha1.ScheduleSpec, started, now time.Time) (bool,
 		return false, time.Time{}, fmt.Errorf("schedule never fires")
 	}
 	lastUp, lastDown := lastFire(up, now), lastFire(down, now)
-	// A startedAt ahead of this clock (skew) counts as now, or Start would stall.
-	if started.After(now) {
+	// A startedAt within the skew counts as now, or Start would stall; one further
+	// ahead is ignored, or it would pin the crew up for as long as it stays ahead.
+	if started.After(now.Add(maxStartSkew)) {
+		started = time.Time{}
+	} else if started.After(now) {
 		started = now
 	}
 	if started.After(lastUp) {

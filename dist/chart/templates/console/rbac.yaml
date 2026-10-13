@@ -5,7 +5,8 @@
 # code patches only suspend and startedAt). Requests also get create (new
 # request), patch (decision) and delete (cancel). With broker.enabled the console
 # also gets pods get/list and pods/exec create, narrowed to one command by vap.yaml.
-# All of it is granted in console.crewNamespace alone when it is set. Nothing else:
+# Pod access comes from the namespaced Role only; the broker requires crewNamespace.
+# The rest is granted in console.crewNamespace alone when it is set. Nothing else:
 # no Secrets, no pods/log, no update.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -25,14 +26,6 @@ rules:
 - apiGroups: ["kirocrew.lsdopen.io"]
   resources: ["kirocrewrequests"]
   verbs: ["get", "list", "watch", "create", "patch", "delete"]
-{{- if .Values.console.broker.enabled }}
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list"]
-- apiGroups: [""]
-  resources: ["pods/exec"]
-  verbs: ["create"]
-{{- end }}
 {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

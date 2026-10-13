@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -21,7 +20,7 @@ var ErrCrewNotFound = errors.New("crew not found")
 
 // IsOwner is true when me owns the crew.
 func IsOwner(me *v1alpha1.KiroCrewAccount, crew *v1alpha1.KiroCrew) bool {
-	return strings.EqualFold(crew.Spec.Owner, me.Spec.Email)
+	return EmailEqual(crew.Spec.Owner, me.Spec.Email)
 }
 
 // CanControl is true for the crew's owner, the owner's manager, or an admin.
@@ -31,7 +30,7 @@ func CanControl(me, owner *v1alpha1.KiroCrewAccount, crew *v1alpha1.KiroCrew) bo
 	case IsOwner(me, crew), me.Spec.Role == v1alpha1.RoleAdmin:
 		return true
 	case me.Spec.Role == v1alpha1.RoleManager:
-		return owner != nil && owner.Spec.Manager != "" && strings.EqualFold(owner.Spec.Manager, me.Spec.Email)
+		return owner != nil && owner.Spec.Manager != "" && EmailEqual(owner.Spec.Manager, me.Spec.Email)
 	default:
 		return false
 	}

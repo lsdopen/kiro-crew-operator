@@ -33,7 +33,7 @@ type Store struct {
 // operator's findAccount, or nil.
 func FindAccount(accounts []v1alpha1.KiroCrewAccount, email string) *v1alpha1.KiroCrewAccount {
 	for i := range accounts {
-		if strings.EqualFold(accounts[i].Spec.Email, email) {
+		if EmailEqual(accounts[i].Spec.Email, email) {
 			return &accounts[i]
 		}
 	}
@@ -146,7 +146,7 @@ func (s *Store) Visible(ctx context.Context, me *v1alpha1.KiroCrewAccount) (*Vie
 	people := []string{me.Spec.Email}
 	if me.Spec.Role == v1alpha1.RoleManager {
 		for i := range accounts.Items {
-			if m := accounts.Items[i].Spec.Manager; m != "" && strings.EqualFold(m, me.Spec.Email) {
+			if m := accounts.Items[i].Spec.Manager; m != "" && EmailEqual(m, me.Spec.Email) {
 				people = append(people, accounts.Items[i].Spec.Email)
 			}
 		}
@@ -184,9 +184,30 @@ func (v *View) markDecidable(accounts []v1alpha1.KiroCrewAccount) *View {
 
 func isOneOf(people []string, email string) bool {
 	for _, p := range people {
-		if strings.EqualFold(p, email) {
+		if EmailEqual(p, email) {
 			return true
 		}
 	}
 	return false
+}
+
+// EmailEqual compares emails with ASCII-only case folding. strings.EqualFold
+// folds Unicode too (U+017F and U+212A fold to s and k), so lookalikes would match.
+func EmailEqual(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		x, y := a[i], b[i]
+		if 'A' <= x && x <= 'Z' {
+			x += 'a' - 'A'
+		}
+		if 'A' <= y && y <= 'Z' {
+			y += 'a' - 'A'
+		}
+		if x != y {
+			return false
+		}
+	}
+	return true
 }

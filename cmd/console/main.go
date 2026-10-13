@@ -80,8 +80,13 @@ func (c config) validate() error {
 		return err
 	}
 	if c.brokerEnabled {
-		if c.tailnetDomain == "" || strings.Contains(c.tailnetDomain, "/") {
-			return errors.New("--broker-enabled needs --tailnet-domain, a bare domain such as example-tailnet.ts.net")
+		if c.crewNamespace == "" {
+			return errors.New("--broker-enabled needs --crew-namespace, so pod access is not cluster-wide")
+		}
+		// A single label would match every host in a public suffix as a dashboard.
+		if d := c.tailnetDomain; strings.Count(d, ".") < 1 || strings.ContainsAny(d, "/ ") ||
+			strings.HasPrefix(d, ".") || strings.HasSuffix(d, ".") || strings.Contains(d, "..") {
+			return errors.New("--broker-enabled needs --tailnet-domain, a bare domain of 2+ labels, e.g. example-tailnet.ts.net")
 		}
 	}
 	u, err := url.Parse(c.redirectURL)

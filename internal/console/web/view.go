@@ -87,7 +87,7 @@ func newPage(v *authz.View, csrf, active string) Page {
 		row := requestRow(q)
 		pending := authz.Pending(q)
 		row.CanDecide = pending && v.Decidable[q.Name]
-		row.CanCancel = pending && strings.EqualFold(q.Spec.Requester, me)
+		row.CanCancel = pending && authz.EmailEqual(q.Spec.Requester, me)
 		p.Requests = append(p.Requests, row)
 	}
 	for i := range v.Accounts {
@@ -108,7 +108,7 @@ func crewRow(c *v1alpha1.KiroCrew, me string) CrewRow {
 	r := CrewRow{
 		Name: c.Name, Owner: c.Spec.Owner, Phase: crewPhase(c), Schedule: scheduleText(c),
 	}
-	if strings.EqualFold(c.Spec.Owner, me) {
+	if authz.EmailEqual(c.Spec.Owner, me) {
 		r.DashboardURL = httpsOnly(c.Status.DashboardURL)
 		r.LoginURL = httpsOnly(c.Status.TailnetLoginURL)
 	}

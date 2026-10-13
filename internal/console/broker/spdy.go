@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -37,7 +36,7 @@ func (e *SPDYExecer) Exec(ctx context.Context, namespace, pod, container string,
 		return nil, fmt.Errorf("building exec: %w", err)
 	}
 	out := &cappedBuffer{max: maxOutput}
-	err = ex.StreamWithContext(ctx, remotecommand.StreamOptions{Stdout: out, Stderr: io.Discard})
+	err = ex.StreamWithContext(ctx, remotecommand.StreamOptions{Stdout: out})
 	var exit clientexec.ExitError
 	switch {
 	case errors.As(err, &exit):

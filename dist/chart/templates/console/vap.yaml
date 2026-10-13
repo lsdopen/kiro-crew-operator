@@ -1,5 +1,8 @@
 {{- if and .Values.console.enabled .Values.console.broker.enabled }}
 {{- $ns := .Values.console.crewNamespace }}
+{{- if not (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy") }}
+{{- fail "console.broker.enabled needs ValidatingAdmissionPolicy (Kubernetes 1.30+) to restrict pods/exec; with helm template pass --api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy" }}
+{{- end }}
 # Narrows the console's pods/exec grant to the one sign-in command. Needs
 # Kubernetes 1.30+. Only the console ServiceAccount is constrained; every other
 # caller is untouched. RBAC cannot see the command, so this is the only control.

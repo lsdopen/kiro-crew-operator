@@ -88,6 +88,8 @@ func TestDashboardHost(t *testing.T) {
 		{"suffix without the dot", "https://evil" + domain, domain, ""},
 		{"domain as a prefix", "https://alice." + domain + ".evil.example.com", domain, ""},
 		{"the domain itself", "https://" + domain, domain, ""},
+		{"non-ASCII host byte", "https://alice\u212a." + domain, domain, ""},
+		{"non-ASCII lookalike of the domain", "https://alice." + strings.Replace(domain, "s", "\u017f", 1), domain, ""},
 		{"empty label", "https://." + domain, domain, ""},
 		{"userinfo host confusion", "https://" + domain + "@evil.example.com", domain, ""},
 		{"userinfo", "https://user@alice." + domain, domain, ""},
