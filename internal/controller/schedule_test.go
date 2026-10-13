@@ -4,15 +4,21 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	kirocrewv1alpha1 "github.com/lsdopen/kiro-crew-operator/api/v1alpha1"
 )
 
 const (
-	weekdayUp    = "0 8 * * 1-5"
-	weekdayDown  = "0 18 * * 1-5"
-	tzUTC        = "UTC"
-	johannesburg = "Africa/Johannesburg"
-	eveningDown  = "2026-10-12T18:00:00Z"
+	weekdayUp     = "0 8 * * 1-5"
+	weekdayDown   = "0 18 * * 1-5"
+	tzUTC         = "UTC"
+	johannesburg  = "Africa/Johannesburg"
+	eveningDown   = "2026-10-12T18:00:00Z"
+	mondayMidday  = "2026-10-12T10:00:00Z"
+	mondayEvening = "2026-10-12T19:00:00Z"
+	tuesdayDown   = "2026-10-13T18:00:00Z"
+	tuesdayUp     = "2026-10-13T08:00:00Z"
 )
 
 func specWith(tz string) kirocrewv1alpha1.KiroCrewSpec {
@@ -40,11 +46,11 @@ func TestComputeDesiredWindow(t *testing.T) {
 		reason   string
 		next     string
 	}{
-		{"inside window", tzUTC, "2026-10-12T10:00:00Z", 1, "", eveningDown},
+		{"inside window", tzUTC, mondayMidday, 1, "", eveningDown},
 		{"before up on a weekday", tzUTC, "2026-10-12T07:00:00Z", 0, kirocrewv1alpha1.ReasonOutsideSchedule, "2026-10-12T08:00:00Z"},
-		{"after down", tzUTC, "2026-10-12T19:00:00Z", 0, kirocrewv1alpha1.ReasonOutsideSchedule, "2026-10-13T08:00:00Z"},
+		{"after down", tzUTC, mondayEvening, 0, kirocrewv1alpha1.ReasonOutsideSchedule, tuesdayUp},
 		{"exactly at up", tzUTC, "2026-10-12T08:00:00Z", 1, "", eveningDown},
-		{"exactly at down", tzUTC, eveningDown, 0, kirocrewv1alpha1.ReasonOutsideSchedule, "2026-10-13T08:00:00Z"},
+		{"exactly at down", tzUTC, eveningDown, 0, kirocrewv1alpha1.ReasonOutsideSchedule, tuesdayUp},
 		{"saturday is off", tzUTC, "2026-10-17T10:00:00Z", 0, kirocrewv1alpha1.ReasonOutsideSchedule, "2026-10-19T08:00:00Z"},
 		{"sunday is off", tzUTC, "2026-10-18T23:00:00Z", 0, kirocrewv1alpha1.ReasonOutsideSchedule, "2026-10-19T08:00:00Z"},
 		// Johannesburg is UTC+2: 07:00Z is 09:00 local, inside the window.
@@ -52,7 +58,7 @@ func TestComputeDesiredWindow(t *testing.T) {
 		// 06:00Z is 08:00 local: exactly up. 05:59Z is still before.
 		{"timezone offset boundary", johannesburg, "2026-10-12T05:59:00Z", 0, kirocrewv1alpha1.ReasonOutsideSchedule, "2026-10-12T06:00:00Z"},
 		{"timezone offset after down", johannesburg, "2026-10-12T16:00:00Z", 0, kirocrewv1alpha1.ReasonOutsideSchedule, "2026-10-13T06:00:00Z"},
-		{"empty timezone is UTC", "", "2026-10-12T10:00:00Z", 1, "", eveningDown},
+		{"empty timezone is UTC", "", mondayMidday, 1, "", eveningDown},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -73,7 +79,7 @@ func TestComputeDesiredWindow(t *testing.T) {
 
 func TestComputeDesiredNoScheduleRuns(t *testing.T) {
 	spec := kirocrewv1alpha1.KiroCrewSpec{Owner: testOwner}
-	got := computeDesired(&spec, utc("2026-10-12T10:00:00Z"))
+	got := computeDesired(&spec, utc(mondayMidday))
 	if got.Replicas != 1 || got.Reason != "" || got.Next != nil {
 		t.Errorf("got %+v, want plain running", got)
 	}
@@ -82,7 +88,7 @@ func TestComputeDesiredNoScheduleRuns(t *testing.T) {
 func TestComputeDesiredSuspendOverridesSchedule(t *testing.T) {
 	spec := specWith(tzUTC)
 	spec.Suspend = true
-	got := computeDesired(&spec, utc("2026-10-12T10:00:00Z")) // inside the window
+	got := computeDesired(&spec, utc(mondayMidday)) // inside the window
 	if got.Replicas != 0 || got.Reason != kirocrewv1alpha1.ReasonSuspended {
 		t.Errorf("got replicas=%d reason=%q, want 0 Suspended", got.Replicas, got.Reason)
 	}
@@ -95,7 +101,7 @@ func TestComputeDesiredSuspendIgnoresInvalidSchedule(t *testing.T) {
 	spec := specWith(tzUTC)
 	spec.Suspend = true
 	spec.Schedule.Up = "garbage"
-	if got := computeDesired(&spec, utc("2026-10-12T10:00:00Z")); got.Replicas != 0 || got.ScheduleErr != nil {
+	if got := computeDesired(&spec, utc(mondayMidday)); got.Replicas != 0 || got.ScheduleErr != nil {
 		t.Errorf("got %+v, want suspended without error", got)
 	}
 }
@@ -145,9 +151,62 @@ func TestReconcilerNowDefaultsToWallClock(t *testing.T) {
 	if d := time.Since(r.now()); d < 0 || d > time.Minute {
 		t.Errorf("default clock off by %v", d)
 	}
-	fixed := utc("2026-10-12T10:00:00Z")
+	fixed := utc(mondayMidday)
 	r.Now = func() time.Time { return fixed }
 	if !r.now().Equal(fixed) {
 		t.Error("injected clock ignored")
+	}
+}
+
+func TestComputeDesiredStartedAt(t *testing.T) {
+	// 2026-10-12 is a Monday; the window is 08:00-18:00 on weekdays.
+	tests := []struct {
+		name     string
+		started  string
+		now      string
+		replicas int32
+		next     string
+	}{
+		{"inside the window", "2026-10-12T09:00:00Z", mondayMidday, 1, eveningDown},
+		{"after down stays up until the next down", mondayEvening, "2026-10-12T20:00:00Z", 1, tuesdayDown},
+		{"before the next up stays up past it", "2026-10-17T10:00:00Z", "2026-10-17T11:00:00Z", 1, "2026-10-19T18:00:00Z"},
+		{"the next down stops it again", mondayEvening, tuesdayDown, 0, "2026-10-14T08:00:00Z"},
+		{"older than the last down is ignored", "2026-10-12T09:00:00Z", mondayEvening, 0, tuesdayUp},
+		{"same instant as a down loses the tie", eveningDown, eveningDown, 0, tuesdayUp},
+		{"ahead of the clock counts as now", "2026-10-12T19:00:05Z", mondayEvening, 1, tuesdayDown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := specWith(tzUTC)
+			spec.StartedAt = &metav1.Time{Time: utc(tt.started)}
+			got := computeDesired(&spec, utc(tt.now))
+			if got.ScheduleErr != nil {
+				t.Fatalf("unexpected error: %v", got.ScheduleErr)
+			}
+			if got.Replicas != tt.replicas {
+				t.Errorf("replicas = %d, want %d", got.Replicas, tt.replicas)
+			}
+			if got.Next == nil || !got.Next.Equal(utc(tt.next)) {
+				t.Errorf("next = %v, want %s", got.Next, tt.next)
+			}
+		})
+	}
+}
+
+func TestComputeDesiredStartedAtSuspendOverrides(t *testing.T) {
+	spec := specWith(tzUTC)
+	spec.Suspend = true
+	spec.StartedAt = &metav1.Time{Time: utc(mondayEvening)}
+	got := computeDesired(&spec, utc("2026-10-12T20:00:00Z"))
+	if got.Replicas != 0 || got.Reason != kirocrewv1alpha1.ReasonSuspended {
+		t.Errorf("got replicas=%d reason=%q, want 0 Suspended", got.Replicas, got.Reason)
+	}
+}
+
+func TestComputeDesiredStartedAtIgnoredWithoutSchedule(t *testing.T) {
+	spec := kirocrewv1alpha1.KiroCrewSpec{Owner: testOwner, StartedAt: &metav1.Time{Time: utc(mondayEvening)}}
+	got := computeDesired(&spec, utc("2026-10-12T20:00:00Z"))
+	if got.Replicas != 1 || got.Reason != "" || got.Next != nil {
+		t.Errorf("got %+v, want plain running", got)
 	}
 }

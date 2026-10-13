@@ -133,7 +133,7 @@ func TestRequestWithoutScheduleDefaultsToAlwaysOn(t *testing.T) {
 
 func TestHTMXCreateRendersRequestsFragment(t *testing.T) {
 	e := newEnv(t, []string{testDomain}, people()...)
-	w := e.post(alice, pathRequests, url.Values{keySize: {sizeLight}}, "HX-Request", "true")
+	w := e.post(alice, pathRequests, url.Values{keySize: {sizeLight}}, "HX-Request", htmxOn)
 	body := w.Body.String()
 	if w.Code != http.StatusOK || strings.Contains(body, "<html") || !strings.Contains(body, "Request submitted.") ||
 		!strings.Contains(body, "Cancel") {
@@ -171,7 +171,7 @@ func TestInvalidRequestInputIsRefused(t *testing.T) {
 
 func TestHTMXErrorIsSwappedIntoFlash(t *testing.T) {
 	e := newEnv(t, []string{testDomain}, people()...)
-	w := e.post(alice, pathRequests, url.Values{keySize: {sizeLight}, "up": {nope}, keyDown: {"x"}}, "HX-Request", "true")
+	w := e.post(alice, pathRequests, url.Values{keySize: {sizeLight}, "up": {nope}, keyDown: {"x"}}, "HX-Request", htmxOn)
 	if w.Code != http.StatusBadRequest || w.Header().Get("HX-Retarget") != "#flash" ||
 		!strings.Contains(w.Body.String(), `role="alert"`) {
 		t.Fatalf("status = %d headers = %v body = %s", w.Code, w.Header(), w.Body.String())
@@ -206,7 +206,7 @@ func TestManagerApprovesReportAsSelf(t *testing.T) {
 
 func TestManagerDenies(t *testing.T) {
 	e := newEnv(t, []string{testDomain}, people(pendingReq("r1", alice))...)
-	if w := e.post(mgr, "/requests/r1/decision", url.Values{keyVerdict: {"denied"}}, "HX-Request", "true"); w.Code != http.StatusOK {
+	if w := e.post(mgr, "/requests/r1/decision", url.Values{keyVerdict: {"denied"}}, "HX-Request", htmxOn); w.Code != http.StatusOK {
 		t.Fatalf("status = %d", w.Code)
 	}
 	if d := e.request("r1").Spec.Decision; d == nil || d.Verdict != v1alpha1.VerdictDenied || d.By != mgr {

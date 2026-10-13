@@ -190,6 +190,13 @@ spec:
                 - development
                 - power
                 type: string
+              startedAt:
+                description: |-
+                  StartedAt is an Up event set by the console's Start. With a schedule the
+                  latest of the last Up, last Down and StartedAt wins, so the next scheduled
+                  Down stops the crew again. Without a schedule it is ignored.
+                format: date-time
+                type: string
               storage:
                 description: Storage configures the instance's persistent volume.
                 properties:

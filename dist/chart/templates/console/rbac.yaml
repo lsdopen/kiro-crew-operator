@@ -1,10 +1,12 @@
 {{- if .Values.console.enabled }}
 {{- $ns := .Values.console.crewNamespace }}
 # Least privilege. Accounts are cluster-scoped, so the ClusterRole carries only
-# them (read, plus create for self sign-up). Crews are read-only. Requests also get
-# create (new request), patch (decision) and delete (cancel). Both are granted in
-# console.crewNamespace alone when it is set. Nothing else: no Secrets, no
-# pods/exec, no update, and no write on crews.
+# them (read, plus create for self sign-up). Crews get patch (Start and Stop; the
+# code patches only suspend and startedAt). Requests also get create (new
+# request), patch (decision) and delete (cancel). With broker.enabled the console
+# also gets pods get/list and pods/exec create, narrowed to one command by vap.yaml.
+# All of it is granted in console.crewNamespace alone when it is set. Nothing else:
+# no Secrets, no pods/log, no update.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -19,10 +21,18 @@ rules:
 # crewNamespace is empty: the console watches crews and requests in every namespace.
 - apiGroups: ["kirocrew.lsdopen.io"]
   resources: ["kirocrews"]
-  verbs: ["get", "list", "watch"]
+  verbs: ["get", "list", "watch", "patch"]
 - apiGroups: ["kirocrew.lsdopen.io"]
   resources: ["kirocrewrequests"]
   verbs: ["get", "list", "watch", "create", "patch", "delete"]
+{{- if .Values.console.broker.enabled }}
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+{{- end }}
 {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -51,10 +61,18 @@ metadata:
 rules:
 - apiGroups: ["kirocrew.lsdopen.io"]
   resources: ["kirocrews"]
-  verbs: ["get", "list", "watch"]
+  verbs: ["get", "list", "watch", "patch"]
 - apiGroups: ["kirocrew.lsdopen.io"]
   resources: ["kirocrewrequests"]
   verbs: ["get", "list", "watch", "create", "patch", "delete"]
+{{- if .Values.console.broker.enabled }}
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -117,6 +117,8 @@ type View struct {
 	Accounts []v1alpha1.KiroCrewAccount
 	// Decidable names the requests Me may approve or deny, by CanDecide.
 	Decidable map[string]bool
+	// Controllable names the crews Me may start or stop, by CanControl.
+	Controllable map[string]bool
 }
 
 // Visible lists what me may see: users their own, managers also their reports',
@@ -163,6 +165,13 @@ func (s *Store) Visible(ctx context.Context, me *v1alpha1.KiroCrewAccount) (*Vie
 }
 
 func (v *View) markDecidable(accounts []v1alpha1.KiroCrewAccount) *View {
+	v.Controllable = map[string]bool{}
+	for i := range v.Crews {
+		c := &v.Crews[i]
+		if CanControl(v.Me, FindAccount(accounts, c.Spec.Owner), c) {
+			v.Controllable[c.Name] = true
+		}
+	}
 	v.Decidable = map[string]bool{}
 	for i := range v.Requests {
 		q := &v.Requests[i]

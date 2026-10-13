@@ -179,6 +179,12 @@ type KiroCrewSpec struct {
 	// Schedule starts and stops the crew on a time window.
 	// +optional
 	Schedule *ScheduleSpec `json:"schedule,omitempty"`
+
+	// StartedAt is an Up event set by the console's Start. With a schedule the
+	// latest of the last Up, last Down and StartedAt wins, so the next scheduled
+	// Down stops the crew again. Without a schedule it is ignored.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
 }
 
 // Condition types reported on a KiroCrew.

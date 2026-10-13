@@ -8,11 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1alpha1 "github.com/lsdopen/kiro-crew-operator/api/v1alpha1"
 	"github.com/lsdopen/kiro-crew-operator/internal/console/auth"
@@ -24,6 +26,7 @@ const (
 	ns         = "kiro-crews"
 	testDomain = "example.com"
 	csrfHeader = "X-CSRF-Token"
+	htmxOn     = "true"
 )
 
 type env struct {
@@ -35,15 +38,39 @@ type env struct {
 	domains []string
 	// sessions caches one session per email, for tests that need a stable sid.
 	sessions map[string]*auth.Session
+	// logs is everything the server logged; patches the bodies of crew patches.
+	logs    *strings.Builder
+	patches [][]byte
+	srv     *Server
 }
 
 func newEnv(t *testing.T, domains []string, objs ...client.Object) *env {
+	t.Helper()
+	return newEnvBroker(t, domains, nil, objs...)
+}
+
+func newEnvBroker(t *testing.T, domains []string, br Opener, objs ...client.Object) *env {
 	t.Helper()
 	s := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(s); err != nil {
 		t.Fatal(err)
 	}
-	k8s := fake.NewClientBuilder().WithScheme(s).WithObjects(objs...).Build()
+	if err := corev1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
+	e := &env{t: t, logs: &strings.Builder{}}
+	k8s := fake.NewClientBuilder().WithScheme(s).WithObjects(objs...).WithInterceptorFuncs(interceptor.Funcs{
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, p client.Patch, opts ...client.PatchOption) error {
+			if _, ok := obj.(*v1alpha1.KiroCrew); ok {
+				body, err := p.Data(obj)
+				if err != nil {
+					return err
+				}
+				e.patches = append(e.patches, body)
+			}
+			return c.Patch(ctx, obj, p, opts...)
+		},
+	}).Build()
 	iss, err := oidctest.New()
 	if err != nil {
 		t.Fatal(err)
@@ -60,11 +87,13 @@ func newEnv(t *testing.T, domains []string, objs ...client.Object) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	log := funcr.New(func(prefix, args string) { e.logs.WriteString(prefix + " " + args + "\n") }, funcr.Options{Verbosity: 10})
 	srv := &Server{
-		Provider: provider, Sealer: sealer, AllowedDomains: domains, Log: logr.Discard(),
+		Provider: provider, Sealer: sealer, AllowedDomains: domains, Log: log, Broker: br,
 		Store: &authz.Store{Client: k8s, Live: k8s, CrewNamespace: ns},
 	}
-	return &env{t: t, h: srv.Handler(), iss: iss, k8s: k8s, sealer: sealer, domains: domains}
+	e.srv, e.h, e.iss, e.k8s, e.sealer, e.domains = srv, srv.Handler(), iss, k8s, sealer, domains
+	return e
 }
 
 // do sends a request carrying the given cookies and returns the recorded response.
@@ -293,7 +322,7 @@ func TestUnauthenticated(t *testing.T) {
 	if w.Code != http.StatusFound || !strings.HasPrefix(w.Header().Get("Location"), "/auth/login") {
 		t.Errorf("page = %d %s", w.Code, w.Header().Get("Location"))
 	}
-	w = e.do(http.MethodGet, "/crews", nil, map[string]string{"HX-Request": "true"}, "")
+	w = e.do(http.MethodGet, "/crews", nil, map[string]string{"HX-Request": htmxOn}, "")
 	if w.Code != http.StatusUnauthorized || w.Header().Get("HX-Redirect") != "/auth/login" {
 		t.Errorf("htmx = %d %s", w.Code, w.Header().Get("HX-Redirect"))
 	}
@@ -434,7 +463,7 @@ func TestHTMXGetsFragmentAndHeaders(t *testing.T) {
 	e := newEnv(t, []string{testDomain}, acct("alice@example.com", v1alpha1.RoleUser, ""))
 	c, sess := e.sessionFor("alice@example.com")
 	full := e.do(http.MethodGet, "/crews", []*http.Cookie{c}, nil, "")
-	frag := e.do(http.MethodGet, "/crews", []*http.Cookie{c}, map[string]string{"HX-Request": "true"}, "")
+	frag := e.do(http.MethodGet, "/crews", []*http.Cookie{c}, map[string]string{"HX-Request": htmxOn}, "")
 	if !strings.Contains(full.Body.String(), "<html") || strings.Contains(frag.Body.String(), "<html") {
 		t.Error("full page / fragment split is wrong")
 	}

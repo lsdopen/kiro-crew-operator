@@ -44,6 +44,10 @@ spec:
         {{- end }}
         - --auth-secret-dir=/etc/console/auth
         - --crew-namespace={{ .Values.console.crewNamespace }}
+        {{- if .Values.console.broker.enabled }}
+        - --broker-enabled
+        - --tailnet-domain={{ required "console.tailnetDomain is required when console.broker.enabled" .Values.console.tailnetDomain }}
+        {{- end }}
         ports:
         - name: http
           containerPort: 8080
