@@ -3,8 +3,8 @@
 # Least privilege. Accounts and the KiroCrewConfig are cluster-scoped, so the
 # ClusterRole carries only them: accounts read, create (self sign-up), update,
 # patch and delete (admin edits), config read plus update and patch on `default`
-# alone. Crews get patch (Start and Stop; the code patches only suspend and
-# startedAt). Requests also get create (new
+# alone. Crews get patch (the code patches only suspend, startedAt, schedule and
+# mcpConfigRef, never size). Requests also get create (new
 # request), patch (decision) and delete (cancel). With broker.enabled the console
 # also gets pods get/list and pods/exec create, narrowed to one command by vap.yaml.
 # Pod access comes from the namespaced Role only; the broker requires crewNamespace.

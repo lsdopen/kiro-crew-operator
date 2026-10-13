@@ -86,6 +86,16 @@ spec:
                   own mcpConfigRef is empty.
                 maxLength: 253
                 type: string
+              mcpConfigs:
+                description: |-
+                  MCPConfigs are the ConfigMap names, in the crew namespace, an admin may
+                  choose from when setting a crew's mcpConfigRef in the console.
+                items:
+                  maxLength: 253
+                  type: string
+                maxItems: 64
+                type: array
+                x-kubernetes-list-type: set
               tailscale:
                 description: Tailscale overrides the tailscale sidecar image of every
                   crew that sets none.

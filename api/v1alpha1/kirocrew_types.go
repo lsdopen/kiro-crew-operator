@@ -203,6 +203,10 @@ const (
 	// It is absent when no schedule is set. A deliberately stopped crew reports
 	// Ready=False with reason Suspended or OutsideSchedule, which is not an error.
 	ConditionScheduled = "Scheduled"
+	// ConditionStorageResized is false while the data volume could not be grown to
+	// the size's storage, for example when its StorageClass forbids expansion. It
+	// is absent otherwise.
+	ConditionStorageResized = "StorageResized"
 )
 
 // Reasons used on Ready and Scheduled when the crew is intentionally stopped.
@@ -210,6 +214,7 @@ const (
 	ReasonSuspended       = "Suspended"
 	ReasonOutsideSchedule = "OutsideSchedule"
 	ReasonInvalidSchedule = "InvalidSchedule"
+	ReasonResizeRefused   = "ResizeRefused"
 )
 
 // KiroCrewStatus reports the observed state of a Kiro Crew instance.

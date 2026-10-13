@@ -1,5 +1,7 @@
 package web
 
+import "strings"
+
 templ Layout(p Page) {
 	<!DOCTYPE html>
 	<html lang="en">
@@ -111,9 +113,63 @@ templ Crews(p Page) {
 							}
 						</td>
 					</tr>
+					if c.CanControl {
+						<tr>
+							<td colspan={ crewCols(p) }>
+								<details>
+									<summary>Edit { c.Name }</summary>
+									@crewEdit(p, c)
+								</details>
+							</td>
+						</tr>
+					}
 				}
 			</tbody>
 		</table>
+	}
+}
+
+templ crewEdit(p Page, c CrewRow) {
+	<form class="stack" method="post" action={ templ.SafeURL("/crews/" + c.Name + "/schedule") } hx-post={ "/crews/" + c.Name + "/schedule" } hx-target="#content">
+		<input type="hidden" name="csrf_token" value={ p.CSRF }/>
+		<fieldset>
+			<legend>Schedule (blank up and down to run always). Saving can start or stop the crew at once.</legend>
+			<label>Up <input name="up" value={ c.Up } placeholder="0 8 * * 1-5" maxlength="64"/></label>
+			<label>Down <input name="down" value={ c.Down } placeholder="0 18 * * 1-5" maxlength="64"/></label>
+			<label>Timezone <input name="timezone" value={ c.Zone } placeholder="UTC" maxlength="64"/></label>
+		</fieldset>
+		<button type="submit">Save schedule</button>
+	</form>
+	if c.Pinned {
+		<p class="muted">Resources pinned by an admin.</p>
+	} else {
+		<form class="stack" method="post" action={ templ.SafeURL("/crews/" + c.Name + "/resize") } hx-post={ "/crews/" + c.Name + "/resize" } hx-target="#content">
+			<input type="hidden" name="csrf_token" value={ p.CSRF }/>
+			<label>Size (now { c.Size })
+				<select name="size">
+					for _, s := range p.Sizes {
+						<option value={ s } selected?={ s == c.Size }>{ s }</option>
+					}
+				</select>
+			</label>
+			<label>Reason (optional) <input name="reason" maxlength="500"/></label>
+			<p class="muted">A resize needs approval. Once approved it applies at once and restarts the crew. Disk only grows.</p>
+			<button type="submit">Request resize</button>
+		</form>
+	}
+	if p.Role == "admin" {
+		<form class="stack" method="post" action={ templ.SafeURL("/crews/" + c.Name + "/mcp") } hx-post={ "/crews/" + c.Name + "/mcp" } hx-target="#content">
+			<input type="hidden" name="csrf_token" value={ p.CSRF }/>
+			<label>MCP config
+				<select name="mcp_config_ref">
+					<option value="" selected?={ c.MCPConfigRef == "" }>(default)</option>
+					for _, m := range p.MCPConfigs {
+						<option value={ m } selected?={ m == c.MCPConfigRef }>{ m }</option>
+					}
+				</select>
+			</label>
+			<button type="submit">Save MCP config</button>
+		</form>
 	}
 }
 
@@ -277,6 +333,7 @@ templ Config(p Page) {
 		<label>Gateway image (blank for the built-in) <input name="gateway_image" value={ p.Config.GatewayImage } maxlength="512"/></label>
 		<label>Tailscale image (blank for the built-in) <input name="tailscale_image" value={ p.Config.TailscaleImage } maxlength="512"/></label>
 		<label>MCP config ConfigMap (blank for none) <input name="mcp_config_ref" value={ p.Config.MCPConfigRef } maxlength="253"/></label>
+		<label>MCP configs admins may pick for a crew (one ConfigMap name per line) <textarea name="mcp_configs" rows="4" maxlength="4096">{ strings.Join(p.Config.MCPConfigs, "\n") }</textarea></label>
 		<button type="submit">Save</button>
 	</form>
 }

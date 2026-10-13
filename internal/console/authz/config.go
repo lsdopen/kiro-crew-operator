@@ -25,14 +25,19 @@ type ConfigEdit struct {
 	AllowedSizes                               []string
 	DefaultSize                                string
 	GatewayImage, TailscaleImage, MCPConfigRef string
+	// MCPConfigs is the allowlist crews' MCP config may be chosen from.
+	MCPConfigs []string
 }
+
+// maxMCPConfigs matches the CRD limit on the allowlist.
+const maxMCPConfigs = 64
 
 func (e ConfigEdit) validate() (v1alpha1.KiroCrewConfigSpec, error) {
 	var spec v1alpha1.KiroCrewConfigSpec
 	for _, name := range e.AllowedSizes {
 		size := v1alpha1.Size(name)
 		if _, ok := v1alpha1.SizeProfiles[size]; !ok {
-			return spec, &InvalidError{"unknown size"}
+			return spec, &InvalidError{msgUnknownSize}
 		}
 		if !slices.Contains(spec.AllowedSizes, size) {
 			spec.AllowedSizes = append(spec.AllowedSizes, size)
@@ -55,6 +60,19 @@ func (e ConfigEdit) validate() (v1alpha1.KiroCrewConfigSpec, error) {
 	spec.MCPConfigRef = strings.TrimSpace(e.MCPConfigRef)
 	if spec.MCPConfigRef != "" && len(validation.IsDNS1123Subdomain(spec.MCPConfigRef)) > 0 {
 		return spec, &InvalidError{"MCP config must be a ConfigMap name"}
+	}
+	for _, name := range e.MCPConfigs {
+		name = strings.TrimSpace(name)
+		if name == "" || slices.Contains(spec.MCPConfigs, name) {
+			continue
+		}
+		if len(validation.IsDNS1123Subdomain(name)) > 0 {
+			return spec, &InvalidError{"allowed MCP configs must be ConfigMap names"}
+		}
+		spec.MCPConfigs = append(spec.MCPConfigs, name)
+	}
+	if len(spec.MCPConfigs) > maxMCPConfigs {
+		return spec, &InvalidError{fmt.Sprintf("allow at most %d MCP configs", maxMCPConfigs)}
 	}
 	return spec, nil
 }

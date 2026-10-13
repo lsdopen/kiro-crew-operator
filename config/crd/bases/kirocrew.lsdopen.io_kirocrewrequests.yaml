@@ -49,6 +49,13 @@ spec:
           spec:
             description: spec defines the desired state of KiroCrewRequest
             properties:
+              crewRef:
+                description: |-
+                  CrewRef turns the request into a resize of this existing crew, which the
+                  requester must own. Empty means a request for a new crew.
+                maxLength: 63
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
               decision:
                 description: Decision is the approver's verdict, written by the console.
                 properties:
@@ -108,6 +115,15 @@ spec:
             required:
             - requester
             type: object
+            x-kubernetes-validations:
+            - message: a resize request cannot carry a schedule
+              rule: '!has(self.crewRef) || !has(self.schedule)'
+            - message: requester, size, schedule and crewRef are immutable; only decision
+                may change
+              rule: self.requester == oldSelf.requester && self.size == oldSelf.size
+                && has(self.schedule) == has(oldSelf.schedule) && (!has(self.schedule)
+                || self.schedule == oldSelf.schedule) && has(self.crewRef) == has(oldSelf.crewRef)
+                && (!has(self.crewRef) || self.crewRef == oldSelf.crewRef)
           status:
             description: status defines the observed state of KiroCrewRequest
             properties:
@@ -181,8 +197,8 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               crewRef:
-                description: CrewRef is the name of the KiroCrew created for this
-                  request.
+                description: CrewRef is the name of the KiroCrew created or resized
+                  for this request.
                 type: string
               decidedAt:
                 description: DecidedAt is when the decision was first accepted.
@@ -198,6 +214,7 @@ spec:
                 - Approved
                 - Denied
                 - Provisioned
+                - Applied
                 - Invalid
                 type: string
             type: object

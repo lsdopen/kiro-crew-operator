@@ -22,6 +22,8 @@ import (
 // maxReasonLen caps the free-text reason, in characters.
 const maxReasonLen = 500
 
+const msgUnknownSize = "unknown size"
+
 var (
 	// ErrForbidden means the account may not perform the action. Nothing was written.
 	ErrForbidden = errors.New("forbidden")
@@ -53,45 +55,54 @@ type NewRequest struct {
 }
 
 // Validate checks the input and returns the size and schedule to store.
-// Cron expressions use the same parser as the crew controller.
 func (n NewRequest) Validate() (v1alpha1.Size, *v1alpha1.ScheduleSpec, error) {
 	size := v1alpha1.Size(n.Size)
 	if _, ok := v1alpha1.SizeProfiles[size]; !ok {
-		return "", nil, &InvalidError{"unknown size"}
+		return "", nil, &InvalidError{msgUnknownSize}
 	}
 	if utf8.RuneCountInString(n.Reason) > maxReasonLen {
 		return "", nil, &InvalidError{fmt.Sprintf("reason is longer than %d characters", maxReasonLen)}
 	}
-	up, down, zone := strings.TrimSpace(n.Up), strings.TrimSpace(n.Down), strings.TrimSpace(n.Zone)
+	schedule, err := parseSchedule(n.Up, n.Down, n.Zone)
+	if err != nil {
+		return "", nil, err
+	}
+	return size, schedule, nil
+}
+
+// parseSchedule validates a schedule form; blank up and down mean no schedule.
+// Cron expressions use the same parser as the crew controller.
+func parseSchedule(upIn, downIn, zoneIn string) (*v1alpha1.ScheduleSpec, error) {
+	up, down, zone := strings.TrimSpace(upIn), strings.TrimSpace(downIn), strings.TrimSpace(zoneIn)
 	if up == "" && down == "" {
 		if zone != "" {
-			return "", nil, &InvalidError{"a timezone needs an up and down schedule"}
+			return nil, &InvalidError{"a timezone needs an up and down schedule"}
 		}
-		return size, nil, nil
+		return nil, nil
 	}
 	if up == "" || down == "" {
-		return "", nil, &InvalidError{"set both up and down, or neither"}
+		return nil, &InvalidError{"set both up and down, or neither"}
 	}
 	if zone == "" {
 		zone = "UTC"
 	}
 	if _, err := time.LoadLocation(zone); err != nil {
-		return "", nil, &InvalidError{fmt.Sprintf("invalid timezone %q", zone)}
+		return nil, &InvalidError{fmt.Sprintf("invalid timezone %q", zone)}
 	}
 	for _, f := range []struct{ label, expr string }{{"up", up}, {"down", down}} {
 		sched, err := cron.ParseStandard(f.expr)
 		if err != nil {
-			return "", nil, &InvalidError{fmt.Sprintf("invalid %s schedule %q", f.label, f.expr)}
+			return nil, &InvalidError{fmt.Sprintf("invalid %s schedule %q", f.label, f.expr)}
 		}
 		if sched.Next(time.Now()).IsZero() {
-			return "", nil, &InvalidError{fmt.Sprintf("%s schedule %q never fires", f.label, f.expr)}
+			return nil, &InvalidError{fmt.Sprintf("%s schedule %q never fires", f.label, f.expr)}
 		}
 	}
 	// The CRD requires at least 9 characters; fail here with a readable message.
 	if len(up) < 9 || len(down) < 9 {
-		return "", nil, &InvalidError{"schedules must be 5-field cron expressions, e.g. 0 8 * * 1-5"}
+		return nil, &InvalidError{"schedules must be 5-field cron expressions, e.g. 0 8 * * 1-5"}
 	}
-	return size, &v1alpha1.ScheduleSpec{Up: up, Down: down, Timezone: zone}, nil
+	return &v1alpha1.ScheduleSpec{Up: up, Down: down, Timezone: zone}, nil
 }
 
 // CanDecide is true for an admin, or for a manager whose report is the requester.
@@ -116,7 +127,7 @@ func Pending(q *v1alpha1.KiroCrewRequest) bool {
 
 func isOpen(q *v1alpha1.KiroCrewRequest) bool {
 	switch q.Status.Phase {
-	case v1alpha1.PhaseDenied, v1alpha1.PhaseProvisioned, v1alpha1.PhaseInvalid:
+	case v1alpha1.PhaseDenied, v1alpha1.PhaseProvisioned, v1alpha1.PhaseApplied, v1alpha1.PhaseInvalid:
 		return false
 	}
 	return true

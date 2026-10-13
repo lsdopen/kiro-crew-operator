@@ -40,7 +40,7 @@ type KiroCrewRequestReconciler struct {
 // +kubebuilder:rbac:groups=kirocrew.lsdopen.io,resources=kirocrewrequests/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kirocrew.lsdopen.io,resources=kirocrewrequests/finalizers,verbs=update
 // +kubebuilder:rbac:groups=kirocrew.lsdopen.io,resources=kirocrewaccounts,verbs=get;list;watch
-// +kubebuilder:rbac:groups=kirocrew.lsdopen.io,resources=kirocrews,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=kirocrew.lsdopen.io,resources=kirocrews,verbs=get;list;watch;create;patch
 
 // Reconcile validates a request's decision and, if approved, creates its crew.
 func (r *KiroCrewRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -48,7 +48,7 @@ func (r *KiroCrewRequestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := r.Get(ctx, req.NamespacedName, request); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if request.Status.Phase == kirocrewv1alpha1.PhaseProvisioned {
+	if finished(request.Status.Phase) {
 		return ctrl.Result{}, nil
 	}
 
@@ -110,7 +110,44 @@ func (r *KiroCrewRequestReconciler) evaluate(ctx context.Context, request *kiroc
 		setPhase(request, kirocrewv1alpha1.PhaseDenied, "Request denied")
 		return nil
 	}
+	if request.Spec.CrewRef != "" {
+		return r.resize(ctx, request)
+	}
 	return r.provision(ctx, request)
+}
+
+// resize applies an approved request's size to the crew it names, once its owner is the requester.
+func (r *KiroCrewRequestReconciler) resize(ctx context.Context, request *kirocrewv1alpha1.KiroCrewRequest) error {
+	name := request.Spec.CrewRef
+	crew := &kirocrewv1alpha1.KiroCrew{}
+	err := r.Get(ctx, types.NamespacedName{Namespace: request.Namespace, Name: name}, crew)
+	switch {
+	case apierrors.IsNotFound(err):
+		setInvalid(request, kirocrewv1alpha1.ReasonCrewNotFound, fmt.Sprintf("KiroCrew %s does not exist", name))
+		return nil
+	case err != nil:
+		return err
+	case !strings.EqualFold(crew.Spec.Owner, request.Spec.Requester):
+		setInvalid(request, kirocrewv1alpha1.ReasonNotOwner,
+			fmt.Sprintf("%s does not own KiroCrew %s", request.Spec.Requester, name))
+		return nil
+	}
+	if crew.Spec.Size != request.Spec.Size {
+		orig := crew.DeepCopy()
+		crew.Spec.Size = request.Spec.Size
+		if err := r.Patch(ctx, crew, client.MergeFrom(orig)); err != nil {
+			return err
+		}
+		logf.FromContext(ctx).Info("Resized KiroCrew", "name", name, "size", request.Spec.Size)
+	}
+	request.Status.CrewRef = name
+	setPhase(request, kirocrewv1alpha1.PhaseApplied, fmt.Sprintf("Resized KiroCrew %s to %s", name, request.Spec.Size))
+	return nil
+}
+
+// finished is true for phases that need no further reconciling.
+func finished(phase kirocrewv1alpha1.RequestPhase) bool {
+	return phase == kirocrewv1alpha1.PhaseProvisioned || phase == kirocrewv1alpha1.PhaseApplied
 }
 
 // provision creates the crew, or adopts the one a previous reconcile created.
@@ -214,7 +251,7 @@ func (r *KiroCrewRequestReconciler) requestsForAccount(ctx context.Context, obj 
 	}
 	var out []reconcile.Request
 	for _, item := range requests.Items {
-		if item.Status.Phase != kirocrewv1alpha1.PhaseProvisioned &&
+		if !finished(item.Status.Phase) &&
 			(strings.EqualFold(item.Spec.Requester, account.Spec.Email) ||
 				(item.Spec.Decision != nil && strings.EqualFold(item.Spec.Decision.By, account.Spec.Email))) {
 			out = append(out, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&item)})
@@ -232,7 +269,7 @@ func (r *KiroCrewRequestReconciler) requestsForConfig(ctx context.Context, _ cli
 	}
 	var out []reconcile.Request
 	for i := range requests.Items {
-		if requests.Items[i].Status.Phase != kirocrewv1alpha1.PhaseProvisioned {
+		if !finished(requests.Items[i].Status.Phase) {
 			out = append(out, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&requests.Items[i])})
 		}
 	}

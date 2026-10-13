@@ -32,6 +32,8 @@ type Page struct {
 	DefaultSize string
 	// Config feeds the admin config editor.
 	Config ConfigForm
+	// MCPConfigs are the ConfigMaps an admin may set on a crew.
+	MCPConfigs []string
 	// CanOpen shows the Open button, which needs sign-in brokering.
 	CanOpen bool
 	// NoManager warns that only an admin can approve this person's requests.
@@ -47,8 +49,14 @@ type CrewRow struct {
 	// DashboardURL and LoginURL are set for the owner only.
 	DashboardURL string
 	LoginURL     string
-	// CanControl gates the Start and Stop buttons; the server checks again on post.
+	// CanControl gates the Start, Stop and edit forms; the server checks again on post.
 	CanControl bool
+	// Size is the current tier. Pinned means an admin's resources override it.
+	Size   string
+	Pinned bool
+	// Up, Down and Zone are the current schedule, blank for always on.
+	Up, Down, Zone string
+	MCPConfigRef   string
 }
 
 // RequestRow is one request.
@@ -70,6 +78,7 @@ type ConfigForm struct {
 	Allowed                                    []SizeChoice
 	DefaultSize                                string
 	GatewayImage, TailscaleImage, MCPConfigRef string
+	MCPConfigs                                 []string
 }
 
 // SizeChoice is one tier and whether the config allows it.
@@ -98,8 +107,9 @@ func newPage(v *authz.View, csrf, active string) Page {
 		Config: ConfigForm{
 			DefaultSize:  string(def),
 			GatewayImage: v.Config.Gateway.Image, TailscaleImage: v.Config.Tailscale.Image,
-			MCPConfigRef: v.Config.MCPConfigRef,
+			MCPConfigRef: v.Config.MCPConfigRef, MCPConfigs: v.Config.MCPConfigs,
 		},
+		MCPConfigs: v.Config.MCPConfigs,
 	}
 	for _, name := range sizeNames() {
 		ok := slices.Contains(allowed, v1alpha1.Size(name))
@@ -138,6 +148,10 @@ func newPage(v *authz.View, csrf, active string) Page {
 func crewRow(c *v1alpha1.KiroCrew, me string) CrewRow {
 	r := CrewRow{
 		Name: c.Name, Owner: c.Spec.Owner, Phase: crewPhase(c), Schedule: scheduleText(c),
+		Size: string(c.Spec.Size), Pinned: authz.ResizePinned(c), MCPConfigRef: c.Spec.MCPConfigRef,
+	}
+	if sc := c.Spec.Schedule; sc != nil {
+		r.Up, r.Down, r.Zone = sc.Up, sc.Down, sc.Timezone
 	}
 	if authz.EmailEqual(c.Spec.Owner, me) {
 		r.DashboardURL = httpsOnly(c.Status.DashboardURL)
@@ -155,6 +169,14 @@ func requestRow(q *v1alpha1.KiroCrewRequest) RequestRow {
 		Name: q.Name, Requester: q.Spec.Requester, Size: string(q.Spec.Size), Phase: phase,
 		DecidedBy: q.Status.DecidedBy, CrewRef: q.Status.CrewRef, Reason: q.Spec.Reason,
 	}
+}
+
+// crewCols is the crews table's column count, for the edit row.
+func crewCols(p Page) string {
+	if p.ShowOwner {
+		return "6"
+	}
+	return "5"
 }
 
 // sizeNames lists the tiers smallest first.

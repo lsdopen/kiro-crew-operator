@@ -44,6 +44,39 @@ func (s *Server) setRunning(w http.ResponseWriter, r *http.Request, sess *auth.S
 	s.render(w, r, sess, acct, "crews", notice)
 }
 
+// editSchedule reads only up, down and timezone: the patch is fixed to the schedule field.
+func (s *Server) editSchedule(w http.ResponseWriter, r *http.Request, sess *auth.Session, acct *v1alpha1.KiroCrewAccount) {
+	f := r.PostForm
+	if err := s.Store.SetSchedule(r.Context(), acct, r.PathValue("name"), f.Get("up"), f.Get("down"), f.Get("timezone")); err != nil {
+		s.writeFailed(w, r, err)
+		return
+	}
+	s.done(w, r, sess, acct, "crews", "Schedule saved.")
+}
+
+// editMCP reads only the ConfigMap name, which must be on the config's allowlist.
+func (s *Server) editMCP(w http.ResponseWriter, r *http.Request, sess *auth.Session, acct *v1alpha1.KiroCrewAccount) {
+	if err := s.Store.SetMCPConfig(r.Context(), acct, r.PathValue("name"), r.PostForm.Get("mcp_config_ref")); err != nil {
+		s.writeFailed(w, r, err)
+		return
+	}
+	s.done(w, r, sess, acct, "crews", "MCP config saved; the crew restarts.")
+}
+
+// resizeCrew files a resize request from size and reason only. The console never writes the crew's size.
+func (s *Server) resizeCrew(w http.ResponseWriter, r *http.Request, sess *auth.Session, acct *v1alpha1.KiroCrewAccount) {
+	q, err := s.Store.RequestResize(r.Context(), acct, r.PathValue("name"), r.PostForm.Get("size"), r.PostForm.Get("reason"))
+	if err != nil {
+		s.writeFailed(w, r, err)
+		return
+	}
+	notice := "Resize requested. Once approved it applies at once and restarts the crew."
+	if q.Spec.Decision != nil {
+		notice = "Resize approved. The crew restarts as it applies."
+	}
+	s.done(w, r, sess, acct, "crews", notice)
+}
+
 // openCrew answers 303 to the crew's dashboard with a fresh sign-in token, for
 // the crew's owner only. The token is in the Location header and nowhere else:
 // not in the body, and not in any log line.

@@ -6,7 +6,7 @@ lands with this document.
 
 ## Decisions
 
-Rulings 1–6 are in. Rulings 7–11 are open and cover phase 3e only
+Rulings 1–11 are in. Rulings 7–11 cover phase 3e only
 (see [Editing a running crew](#editing-a-running-crew-3e)). Everything else
 in this document is decided.
 
@@ -18,11 +18,11 @@ in this document is decided.
 | 4 | Who may write `spec.decision` outside the console? | No ValidatingAdmissionPolicy and no break-glass group for now. Cluster admins can approve through the Kubernetes API. Residual risk: anyone with update or patch on `kirocrewrequests` can forge `decision.by`, so chart RBAC grants that only to the console ServiceAccount, and the controller's `canDecide` check stays defence in depth. Future option: a ValidatingAdmissionPolicy that allows `spec.decision` changes only from the console ServiceAccount plus a configurable break-glass group. | Deferred |
 | 5 | Should the chart docs recommend a private ingress, with public as the opt-in? | Yes, in the docs, not in the chart defaults. The docs lead with the private example and present public as an opt-in. The chart stays exposure-neutral (`ingress.enabled: false`, empty `className` and `annotations`). SSO stays the only *authentication* step either way, and the threat model assumes neither a private network nor an allowlist. | Accepted |
 | 6 | Can users request on someone else's behalf? | No. `spec.requester` is always the session email. | Accepted |
-| 7 | Who may change a running crew's schedule, and does it need approval? | Recommend: owner, owner's manager and admin, applied directly with no request. Same set as Start/Stop. | Open |
-| 8 | How is a size change approved? | Recommend: reuse `KiroCrewRequest` with a new `spec.crewRef` naming the crew. Same approvers as `canDecide`. A manager or admin resizing a report's crew files and approves in one action, so every resize leaves a request with `decision.by`. | Open |
-| 9 | May a crew be downsized, and what happens to its disk? | Recommend: yes for CPU and memory. The PVC never shrinks (Kubernetes cannot shrink one); it grows to the new tier's storage when that is larger. | Open |
-| 10 | When does an approved resize take effect on a running crew? | Recommend: immediately, which restarts the pod. The request form warns the owner. A stopped crew picks it up on its next start. | Open |
-| 11 | Who may change a crew's MCP config, and to what? | Recommend: admin only, choosing from a `KiroCrewConfig.spec.mcpConfigs` allowlist of ConfigMap names. Clearing it falls back to `KiroCrewConfig.spec.mcpConfigRef`. The console gets no ConfigMap access. | Open |
+| 7 | Who may change a running crew's schedule, and does it need approval? | Owner, owner's manager and admin, applied directly with no request. Same set as Start/Stop. | Accepted |
+| 8 | How is a size change approved? | Reuse `KiroCrewRequest` with a new `spec.crewRef` naming the crew. Same approvers as `canDecide`. A manager or admin resizing a report's crew files and approves in one action, so every resize leaves a request with `decision.by`. | Accepted |
+| 9 | May a crew be downsized, and what happens to its disk? | Yes for CPU and memory. The PVC never shrinks (Kubernetes cannot shrink one); it grows to the new tier's storage when that is larger. | Accepted |
+| 10 | When does an approved resize take effect on a running crew? | Immediately, which restarts the pod. The request form warns the owner. A stopped crew picks it up on its next start. | Accepted |
+| 11 | Who may change a crew's MCP config, and to what? | Admin only, choosing from a `KiroCrewConfig.spec.mcpConfigs` allowlist of ConfigMap names. Clearing it falls back to `KiroCrewConfig.spec.mcpConfigRef`. The console gets no ConfigMap access. | Accepted |
 
 Flagged on the decisions already made:
 
