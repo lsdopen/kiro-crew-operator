@@ -101,7 +101,7 @@ func CanDecide(me, requester *v1alpha1.KiroCrewAccount) bool {
 		return true
 	case v1alpha1.RoleManager:
 		return requester != nil && requester.Spec.Manager != "" &&
-			strings.EqualFold(requester.Spec.Manager, me.Spec.Email)
+			EmailEqual(requester.Spec.Manager, me.Spec.Email)
 	default:
 		return false
 	}
@@ -136,7 +136,7 @@ func (s *Store) CreateRequest(ctx context.Context, me *v1alpha1.KiroCrewAccount,
 		return nil, fmt.Errorf("listing requests: %w", err)
 	}
 	for i := range reqs.Items {
-		if strings.EqualFold(reqs.Items[i].Spec.Requester, me.Spec.Email) && isOpen(&reqs.Items[i]) {
+		if EmailEqual(reqs.Items[i].Spec.Requester, me.Spec.Email) && isOpen(&reqs.Items[i]) {
 			return nil, ErrOpenRequest
 		}
 	}
@@ -145,7 +145,7 @@ func (s *Store) CreateRequest(ctx context.Context, me *v1alpha1.KiroCrewAccount,
 		return nil, fmt.Errorf("listing crews: %w", err)
 	}
 	for i := range crews.Items {
-		if strings.EqualFold(crews.Items[i].Spec.Owner, me.Spec.Email) {
+		if EmailEqual(crews.Items[i].Spec.Owner, me.Spec.Email) {
 			return nil, ErrHasCrew
 		}
 	}
@@ -201,7 +201,7 @@ func (s *Store) Cancel(ctx context.Context, me *v1alpha1.KiroCrewAccount, name s
 	if err != nil {
 		return err
 	}
-	if !strings.EqualFold(q.Spec.Requester, me.Spec.Email) {
+	if !EmailEqual(q.Spec.Requester, me.Spec.Email) {
 		return ErrForbidden
 	}
 	if !Pending(q) {

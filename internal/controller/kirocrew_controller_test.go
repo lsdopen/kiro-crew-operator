@@ -163,6 +163,56 @@ var _ = Describe("KiroCrew Controller", func() {
 			Expect(*sts.Spec.Replicas).To(Equal(int32(1)))
 		})
 
+		It("should scale up on startedAt outside the window and stop at the next down", func() {
+			var crew kirocrewv1alpha1.KiroCrew
+			Expect(k8sClient.Get(ctx, typeNamespacedName, &crew)).To(Succeed())
+			crew.Spec.Schedule = &kirocrewv1alpha1.ScheduleSpec{
+				Up: weekdayUp, Down: weekdayDown, Timezone: tzUTC,
+			}
+			Expect(k8sClient.Update(ctx, &crew)).To(Succeed())
+
+			now := time.Date(2026, 10, 12, 19, 0, 0, 0, time.UTC) // Monday evening, outside the window
+			r := &KiroCrewReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Now:    func() time.Time { return now },
+			}
+			req := reconcile.Request{NamespacedName: typeNamespacedName}
+			_, err := r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			var sts appsv1.StatefulSet
+			stsKey := types.NamespacedName{Name: namePrefix + "-" + resourceName, Namespace: resourceNamespace}
+			Expect(k8sClient.Get(ctx, stsKey, &sts)).To(Succeed())
+			Expect(*sts.Spec.Replicas).To(BeZero())
+
+			By("starting it with startedAt")
+			Expect(k8sClient.Get(ctx, typeNamespacedName, &crew)).To(Succeed())
+			crew.Spec.StartedAt = &metav1.Time{Time: now}
+			Expect(k8sClient.Update(ctx, &crew)).To(Succeed())
+			res, err := r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.RequeueAfter).To(Equal(23 * time.Hour)) // until 18:00 Tuesday
+			Expect(k8sClient.Get(ctx, stsKey, &sts)).To(Succeed())
+			Expect(*sts.Spec.Replicas).To(Equal(int32(1)))
+
+			By("stopping at the next scheduled down")
+			now = time.Date(2026, 10, 13, 18, 0, 0, 0, time.UTC)
+			_, err = r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, stsKey, &sts)).To(Succeed())
+			Expect(*sts.Spec.Replicas).To(BeZero())
+
+			By("suspend overrides startedAt")
+			now = time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC) // inside the window
+			Expect(k8sClient.Get(ctx, typeNamespacedName, &crew)).To(Succeed())
+			crew.Spec.Suspend = true
+			Expect(k8sClient.Update(ctx, &crew)).To(Succeed())
+			_, err = r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, stsKey, &sts)).To(Succeed())
+			Expect(*sts.Spec.Replicas).To(BeZero())
+		})
+
 		It("should be idempotent across repeated reconciles", func() {
 			controllerReconciler := &KiroCrewReconciler{
 				Client: k8sClient,

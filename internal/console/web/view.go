@@ -29,6 +29,8 @@ type Page struct {
 	Notice string
 	// Sizes are the choices on the request form.
 	Sizes []string
+	// CanOpen shows the Open button, which needs sign-in brokering.
+	CanOpen bool
 	// NoManager warns that only an admin can approve this person's requests.
 	NoManager bool
 }
@@ -42,6 +44,8 @@ type CrewRow struct {
 	// DashboardURL and LoginURL are set for the owner only.
 	DashboardURL string
 	LoginURL     string
+	// CanControl gates the Start and Stop buttons; the server checks again on post.
+	CanControl bool
 }
 
 // RequestRow is one request.
@@ -74,14 +78,16 @@ func newPage(v *authz.View, csrf, active string) Page {
 		Sizes:     sizeNames(), NoManager: v.Me.Spec.Manager == "",
 	}
 	for i := range v.Crews {
-		p.Crews = append(p.Crews, crewRow(&v.Crews[i], me))
+		row := crewRow(&v.Crews[i], me)
+		row.CanControl = v.Controllable[row.Name]
+		p.Crews = append(p.Crews, row)
 	}
 	for i := range v.Requests {
 		q := &v.Requests[i]
 		row := requestRow(q)
 		pending := authz.Pending(q)
 		row.CanDecide = pending && v.Decidable[q.Name]
-		row.CanCancel = pending && strings.EqualFold(q.Spec.Requester, me)
+		row.CanCancel = pending && authz.EmailEqual(q.Spec.Requester, me)
 		p.Requests = append(p.Requests, row)
 	}
 	for i := range v.Accounts {
@@ -102,7 +108,7 @@ func crewRow(c *v1alpha1.KiroCrew, me string) CrewRow {
 	r := CrewRow{
 		Name: c.Name, Owner: c.Spec.Owner, Phase: crewPhase(c), Schedule: scheduleText(c),
 	}
-	if strings.EqualFold(c.Spec.Owner, me) {
+	if authz.EmailEqual(c.Spec.Owner, me) {
 		r.DashboardURL = httpsOnly(c.Status.DashboardURL)
 		r.LoginURL = httpsOnly(c.Status.TailnetLoginURL)
 	}

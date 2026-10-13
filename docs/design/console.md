@@ -108,8 +108,8 @@ MUST hold only crew pods, because `pods/exec` below is namespace-wide.
 | Role (crewNamespace) | `kirocrews` | patch (only `suspend`/`startedAt`; code-enforced) | 3c |
 | Role (crewNamespace) | `kirocrewrequests` | get, list, watch | 3a |
 | Role (crewNamespace) | `kirocrewrequests` | create, patch, delete (delete is "cancel my Pending request") | 3b |
-| Role (crewNamespace) | `pods` | get | 3c |
-| Role (crewNamespace) | `pods/exec` | create (+ get for the WebSocket upgrade on API servers that authorize it as get) | 3c |
+| Role (crewNamespace) | `pods` | get, list (live reads, no watch) | 3c, `console.broker.enabled` |
+| Role (crewNamespace) | `pods/exec` | create (the console execs over SPDY, a POST, so `get` is not needed) | 3c, `console.broker.enabled` |
 
 No Secrets, no `pods/log`, no StatefulSets, no `impersonate`, no `escalate`.
 The chart grants no other subject update or patch on `kirocrewrequests`
@@ -162,8 +162,13 @@ to the console ServiceAccount, admits only:
 This policy is separate from the deferred decision-write policy (Decision 4)
 and stays. Anything else is denied. A compromised console can then mint sign-in links,
 which redeem only from the owner's own device. It cannot get a shell.
-VAP supports `CONNECT`; 3c verifies it on the target cluster version before
-granting `pods/exec`.
+
+Verified in 3c on a real kube-apiserver (envtest, Kubernetes 1.37): a VAP matches
+`CONNECT pods/exec` and sees the `PodExecOptions` object, including `command`, so it
+can narrow the exec. `internal/console/broker/vap_test.go` denies a shell, extra
+args, another `--ttl`, another container, stdin and a tty, and admits the one
+command. Needs Kubernetes 1.30+ (VAP GA). The policy binds the console
+ServiceAccount only. Not exercised: a live SPDY stream against a kubelet.
 
 ### Token path through the console's Ingress, private or public
 

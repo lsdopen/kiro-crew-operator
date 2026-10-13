@@ -12,6 +12,9 @@ import (
 // maxLookback bounds the search for the most recent fire of a cron expression.
 const maxLookback = 2 * 366 * 24 * time.Hour
 
+// maxStartSkew is how far ahead of this clock a startedAt may be and still count.
+const maxStartSkew = 5 * time.Minute
+
 // desiredState is what the schedule and suspend flag resolve to at a point in time.
 type desiredState struct {
 	Replicas int32
@@ -24,7 +27,8 @@ type desiredState struct {
 }
 
 // computeDesired resolves replicas for the crew at now. Suspend wins over
-// schedule. An invalid schedule fails open (runs) and is reported via ScheduleErr.
+// schedule; spec.startedAt counts as an Up event on a scheduled crew. An invalid
+// schedule fails open (runs) and is reported via ScheduleErr.
 func computeDesired(spec *kirocrewv1alpha1.KiroCrewSpec, now time.Time) desiredState {
 	if spec.Suspend {
 		return desiredState{Replicas: 0, Reason: kirocrewv1alpha1.ReasonSuspended}
@@ -32,7 +36,11 @@ func computeDesired(spec *kirocrewv1alpha1.KiroCrewSpec, now time.Time) desiredS
 	if spec.Schedule == nil {
 		return desiredState{Replicas: 1}
 	}
-	on, next, err := inUpWindow(spec.Schedule, now)
+	var started time.Time
+	if spec.StartedAt != nil {
+		started = spec.StartedAt.Time
+	}
+	on, next, err := inUpWindow(spec.Schedule, started, now)
 	if err != nil {
 		return desiredState{Replicas: 1, ScheduleErr: err}
 	}
@@ -42,8 +50,10 @@ func computeDesired(spec *kirocrewv1alpha1.KiroCrewSpec, now time.Time) desiredS
 	return desiredState{Replicas: 0, Reason: kirocrewv1alpha1.ReasonOutsideSchedule, Next: &next}
 }
 
-// inUpWindow reports whether now is in the up window and when the state next flips.
-func inUpWindow(s *kirocrewv1alpha1.ScheduleSpec, now time.Time) (bool, time.Time, error) {
+// inUpWindow reports whether the crew is up at now and when the state next flips.
+// started is an extra Up event (zero for none); the latest event wins, and a Down
+// wins a tie.
+func inUpWindow(s *kirocrewv1alpha1.ScheduleSpec, started, now time.Time) (bool, time.Time, error) {
 	tz := s.Timezone
 	if tz == "" {
 		tz = "UTC"
@@ -67,6 +77,16 @@ func inUpWindow(s *kirocrewv1alpha1.ScheduleSpec, now time.Time) (bool, time.Tim
 		return false, time.Time{}, fmt.Errorf("schedule never fires")
 	}
 	lastUp, lastDown := lastFire(up, now), lastFire(down, now)
+	// A startedAt within the skew counts as now, or Start would stall; one further
+	// ahead is ignored, or it would pin the crew up for as long as it stays ahead.
+	if started.After(now.Add(maxStartSkew)) {
+		started = time.Time{}
+	} else if started.After(now) {
+		started = now
+	}
+	if started.After(lastUp) {
+		lastUp = started
+	}
 
 	var on bool
 	switch {
@@ -74,7 +94,6 @@ func inUpWindow(s *kirocrewv1alpha1.ScheduleSpec, now time.Time) (bool, time.Tim
 		// No past fire to go on: the crew is up if the next flip is a down.
 		on = nextDown.Before(nextUp)
 	default:
-		// Down wins a tie.
 		on = lastUp.After(lastDown)
 	}
 	if on {

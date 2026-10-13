@@ -51,6 +51,11 @@ templ Content(p Page) {
 
 templ Crews(p Page) {
 	<h2>Crews</h2>
+	<div id="flash" role="status">
+		if p.Notice != "" {
+			<p>{ p.Notice }</p>
+		}
+	</div>
 	if len(p.Crews) == 0 {
 		<p class="muted">No crews yet.</p>
 	} else {
@@ -64,6 +69,7 @@ templ Crews(p Page) {
 					<th>Phase</th>
 					<th>Schedule</th>
 					<th>Dashboard</th>
+					<th></th>
 				</tr>
 			</thead>
 			<tbody>
@@ -77,10 +83,28 @@ templ Crews(p Page) {
 						<td>{ c.Schedule }</td>
 						<td>
 							if c.DashboardURL != "" {
-								<a href={ templ.URL(c.DashboardURL) } rel="noopener noreferrer">Open</a>
+								<span>{ c.DashboardURL }</span>
+								if p.CanOpen {
+									<form class="inline" method="post" action={ templ.SafeURL("/crews/" + c.Name + "/open") }>
+										<input type="hidden" name="csrf_token" value={ p.CSRF }/>
+										<button type="submit">Open</button>
+									</form>
+								}
 								<div class="muted">Requires Tailscale, connected as { p.Email }</div>
 							} else if c.LoginURL != "" {
 								<a href={ templ.URL(c.LoginURL) } rel="noopener noreferrer">Authenticate your crew node</a>
+							}
+						</td>
+						<td>
+							if c.CanControl {
+								<form class="inline" method="post" action={ templ.SafeURL("/crews/" + c.Name + "/start") } hx-post={ "/crews/" + c.Name + "/start" } hx-target="#content">
+									<input type="hidden" name="csrf_token" value={ p.CSRF }/>
+									<button type="submit">Start</button>
+								</form>
+								<form class="inline" method="post" action={ templ.SafeURL("/crews/" + c.Name + "/stop") } hx-post={ "/crews/" + c.Name + "/stop" } hx-target="#content">
+									<input type="hidden" name="csrf_token" value={ p.CSRF }/>
+									<button type="submit">Stop</button>
+								</form>
 							}
 						</td>
 					</tr>

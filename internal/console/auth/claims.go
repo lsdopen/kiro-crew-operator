@@ -24,6 +24,7 @@ var (
 	ErrMissingDomain    = errors.New("id token has no hd claim")
 	ErrDomainNotAllowed = errors.New("hd is not an allowed domain")
 	ErrEmailMismatch    = errors.New("email does not belong to hd")
+	ErrEmailNotASCII    = errors.New("email is not ASCII")
 )
 
 // NormalizeDomains lowercases, trims and drops empty entries.
@@ -48,6 +49,10 @@ func CheckClaims(c Claims, allowed []string) (string, error) {
 	if !c.EmailVerified {
 		return "", ErrEmailUnverified
 	}
+	// Checked before lowercasing: ToLower maps U+212A to k, so a lookalike would pass.
+	if !isASCII(c.Email) {
+		return "", ErrEmailNotASCII
+	}
 	hd := strings.ToLower(strings.TrimSpace(c.HostedDomain))
 	if hd == "" {
 		return "", ErrMissingDomain
@@ -61,4 +66,13 @@ func CheckClaims(c Claims, allowed []string) (string, error) {
 		return "", ErrEmailMismatch
 	}
 	return email, nil
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
 }
