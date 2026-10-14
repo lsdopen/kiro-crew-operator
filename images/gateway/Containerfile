@@ -81,7 +81,11 @@ RUN set -eux; \
     # container environment, so the wrapper and the shell startup files source
     # the file the entrypoint writes (KIROCREW_HOME and friends) first.
     KIROCREW_BIN="$(command -v kirocrew)"; \
-    install -d -o kirocrew -g kirocrew /home/kirocrew/.local/bin; \
+    # install -d only chowns the last component, so name every parent explicitly.
+    install -d -o kirocrew -g kirocrew /home/kirocrew/.local /home/kirocrew/.local/bin /home/kirocrew/.local/share; \
+    # kiro-cli keeps its auth DB here; the entrypoint creates the target on the data volume.
+    ln -s /data/kiro-cli /home/kirocrew/.local/share/kiro-cli; \
+    chown -h kirocrew:kirocrew /home/kirocrew/.local/share/kiro-cli; \
     printf '%s\n' \
         '#!/bin/sh' \
         '[ -f "$HOME/.kirocrew-env" ] && . "$HOME/.kirocrew-env"' \

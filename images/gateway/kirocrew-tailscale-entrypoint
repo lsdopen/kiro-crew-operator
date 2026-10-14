@@ -22,6 +22,9 @@ env_file="${home}/.kirocrew-env"
 
 mkdir -p "${state_dir}" "$(dirname "${socket}")"
 
+# Target of ~/.local/share/kiro-cli, so the kiro-cli sign-in survives restarts.
+mkdir -p -m 0700 "${KIROCREW_HOME:-/data}/kiro-cli"
+
 "${ts_env[@]}" tailscaled --tun=userspace-networking \
 	--statedir="${state_dir}" --state="${state_dir}/tailscaled.state" \
 	--socket="${socket}" &
