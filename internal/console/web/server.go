@@ -38,10 +38,8 @@ type Server struct {
 	Store          *authz.Store
 	AllowedDomains []string
 	Log            logr.Logger
-	// Broker signs owners in to their crews. Nil disables /crews/{name}/open.
-	Broker Opener
 
-	writeLimit, openLimit *limiter
+	writeLimit *limiter
 }
 
 // maxFormBytes caps a posted form.
@@ -52,7 +50,6 @@ type authedHandler func(w http.ResponseWriter, r *http.Request, sess *auth.Sessi
 // Handler is the full console, with security headers and Origin checks applied.
 func (s *Server) Handler() http.Handler {
 	s.writeLimit = newLimiter(writeBurst, writeEvery)
-	s.openLimit = newLimiter(openBurst, openEvery)
 	static, _ := fs.Sub(staticFS, "static")
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
@@ -73,7 +70,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /config", s.authed(s.updateConfig))
 	mux.HandleFunc("POST /crews/{name}/start", s.authed(s.startCrew))
 	mux.HandleFunc("POST /crews/{name}/stop", s.authed(s.stopCrew))
-	mux.HandleFunc("POST /crews/{name}/open", s.authed(s.openCrew))
 	mux.HandleFunc("POST /crews/{name}/schedule", s.authed(s.editSchedule))
 	mux.HandleFunc("POST /crews/{name}/resize", s.authed(s.resizeCrew))
 	mux.HandleFunc("POST /crews/{name}/mcp", s.authed(s.editMCP))
@@ -275,7 +271,6 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, sess *auth.Sessi
 	}
 	p := newPage(view, s.Sealer.CSRFToken(sess.SID), active)
 	p.Notice = notice
-	p.CanOpen = s.Broker != nil
 	w.Header().Set("Vary", "HX-Request")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	c := Layout(p)

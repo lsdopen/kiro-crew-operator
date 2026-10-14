@@ -255,18 +255,6 @@ console:
     ## e.g. existingSecret: kiro-crew-console-auth
     existingSecret: ""
 
-  ## Sign-in brokering: the Open button execs `kirocrew token` in the owner's crew
-  ## pod and redirects the owner to their dashboard with a fresh token. Opt-in,
-  ## because it grants pods/exec in crewNamespace. That namespace must hold only
-  ## crew pods. A ValidatingAdmissionPolicy (Kubernetes 1.30+) limits the grant to
-  ## that one command. Needs crewNamespace and tailnetDomain.
-  broker:
-    enabled: false
-
-  ## The tailnet's MagicDNS suffix, e.g. example-tailnet.ts.net. Required when
-  ## broker.enabled. A crew's dashboard URL must be https on a subdomain of it.
-  tailnetDomain: ""
-
   ## Exposure is the operator's choice: set class and annotations for a private or
   ## public ingress. SSO is the authentication step either way.
   ## Rate-limit /auth at your ingress or gateway; the console does not do per-IP limiting.

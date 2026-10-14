@@ -43,17 +43,7 @@ spec:
         - --auth-allow-empty-domains
         {{- end }}
         - --auth-secret-dir=/etc/console/auth
-        {{- if .Values.console.broker.enabled }}
-        - --crew-namespace={{ required "console.crewNamespace is required when console.broker.enabled" .Values.console.crewNamespace }}
-        - --broker-enabled
-        {{- $td := required "console.tailnetDomain is required when console.broker.enabled" .Values.console.tailnetDomain }}
-        {{- if not (regexMatch "^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$" $td) }}
-        {{- fail "console.tailnetDomain must have at least two dot-separated labels, with no leading or trailing dot" }}
-        {{- end }}
-        - --tailnet-domain={{ $td }}
-        {{- else }}
         - --crew-namespace={{ .Values.console.crewNamespace }}
-        {{- end }}
         ports:
         - name: http
           containerPort: 8080
