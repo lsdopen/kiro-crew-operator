@@ -37,10 +37,6 @@ type KiroCrewConfigSpec struct {
 	// +optional
 	Gateway ImageRef `json:"gateway,omitzero"`
 
-	// Tailscale overrides the tailscale sidecar image of every crew that sets none.
-	// +optional
-	Tailscale ImageRef `json:"tailscale,omitzero"`
-
 	// MCPConfigRef names the ConfigMap used by crews whose own mcpConfigRef is empty.
 	// +optional
 	// +kubebuilder:validation:MaxLength=253

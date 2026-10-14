@@ -65,9 +65,8 @@ var _ = Describe("KiroCrew Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &KiroCrewReconciler{
-				Client:        k8sClient,
-				Scheme:        k8sClient.Scheme(),
-				TailnetDomain: "example-tailnet.ts.net",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -77,12 +76,12 @@ var _ = Describe("KiroCrew Controller", func() {
 
 			name := namePrefix + "-" + resourceName
 
-			By("creating the StatefulSet with both containers")
+			By("creating the StatefulSet with a single container and no sidecar")
 			var sts appsv1.StatefulSet
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name: name, Namespace: resourceNamespace,
 			}, &sts)).To(Succeed())
-			Expect(sts.Spec.Template.Spec.Containers).To(HaveLen(2))
+			Expect(sts.Spec.Template.Spec.Containers).To(HaveLen(1))
 
 			By("granting the gateway no more than the default size tier")
 			light := kirocrewv1alpha1.SizeProfiles[kirocrewv1alpha1.SizeLight]
@@ -105,13 +104,30 @@ var _ = Describe("KiroCrew Controller", func() {
 			}, &np)).To(Succeed())
 			Expect(np.Spec.Ingress).To(BeEmpty())
 
-			By("delivering the config that makes the gateway trust its tailnet origin")
+			By("running tailscaled in the gateway container without widening its security context")
+			Expect(gateway.Env).To(ContainElements(
+				corev1.EnvVar{Name: "TS_HOSTNAME", Value: name},
+				corev1.EnvVar{Name: "TS_STATE_DIR", Value: "/data/tailscale"},
+				corev1.EnvVar{Name: "TS_SOCKET", Value: "/var/run/tailscale/tailscaled.sock"},
+			))
+			for _, e := range gateway.Env {
+				Expect(e.Name).NotTo(Equal("TS_SERVE_CONFIG"))
+			}
+			Expect(gateway.SecurityContext.Capabilities.Drop).To(ConsistOf(corev1.Capability("ALL")))
+			Expect(gateway.SecurityContext.Capabilities.Add).To(BeEmpty())
+			Expect(gateway.SecurityContext.AllowPrivilegeEscalation).To(HaveValue(BeFalse()))
+			Expect(gateway.SecurityContext.Privileged).To(BeNil())
+			Expect(gateway.SecurityContext.RunAsUser).To(BeNil()) // inherits the pod's uid 1000
+			podSC := sts.Spec.Template.Spec.SecurityContext
+			Expect(podSC.RunAsNonRoot).To(HaveValue(BeTrue()))
+			Expect(podSC.RunAsUser).To(HaveValue(BeEquivalentTo(1000)))
+			Expect(gateway.VolumeMounts).To(ContainElement(HaveField("MountPath", "/var/run/tailscale")))
+
+			By("publishing nothing through tailscale serve")
+			Expect(sts.Spec.Template.Spec.Volumes).NotTo(ContainElement(HaveField("Name", "config")))
 			var cm corev1.ConfigMap
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name: name + "-config", Namespace: resourceNamespace,
-			}, &cm)).To(Succeed())
-			Expect(cm.Data["config.local.json"]).To(ContainSubstring("\"enabled\": true"))
-			Expect(cm.Data["config.local.json"]).To(ContainSubstring("\"trust_identity\": true"))
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: name + "-config", Namespace: resourceNamespace}, &cm)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
 
 			By("reporting it is not ready while the node is unauthenticated")
 			var updated kirocrewv1alpha1.KiroCrew
@@ -119,8 +135,7 @@ var _ = Describe("KiroCrew Controller", func() {
 			ready := findCondition(updated.Status.Conditions, kirocrewv1alpha1.ConditionReady)
 			Expect(ready).NotTo(BeNil())
 			Expect(ready.Status).To(Equal(metav1.ConditionFalse))
-			// No dashboard URL until the node is actually on the tailnet, or the
-			// owner would be sent to a name that does not resolve.
+			// Nothing is served over HTTPS any more.
 			Expect(updated.Status.DashboardURL).To(BeEmpty())
 		})
 

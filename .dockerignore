@@ -15,3 +15,6 @@
 # Re-include Go module files
 !go.mod
 !go.sum
+
+# Re-include the gateway image's entrypoint
+!images/gateway/kirocrew-tailscale-entrypoint

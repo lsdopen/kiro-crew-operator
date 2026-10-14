@@ -89,13 +89,8 @@ spec:
         {{- end }}
         command:
         - /manager
-        env:
-        # The tailnet's MagicDNS suffix, e.g. "example-tailnet.ts.net". The
-        # operator needs it to publish each instance's dashboard address in
-        # status.dashboardURL, which is the URL the Kiro Crew desktop app opens.
-        - name: TAILNET_DOMAIN
-          value: {{ .Values.tailnet.domain | quote }}
         {{- with .Values.manager.extraEnv }}
+        env:
         {{- toYaml . | nindent 8 }}
         {{- end }}
         image: "{{ .Values.manager.image.repository | default "controller" }}{{- if not (contains "@" (.Values.manager.image.repository | default "controller")) }}:{{ .Values.manager.image.tag | default .Chart.AppVersion }}{{- end }}"

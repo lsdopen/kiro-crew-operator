@@ -19,8 +19,8 @@ spec:
     storageClassName: gp3
 
   tailscale:
-    # Becomes the MagicDNS name, so the dashboard ends up at
-    # https://kiro-crew-seagyn.<tailnet>.ts.net once the node is authenticated.
+    # Becomes the MagicDNS name the desktop app SSHes to,
+    # kiro-crew-seagyn.<tailnet>.ts.net, once the node is authenticated.
     hostname: kiro-crew-seagyn
 
   aws:

@@ -266,7 +266,6 @@ func (in *KiroCrewConfigSpec) DeepCopyInto(out *KiroCrewConfigSpec) {
 		copy(*out, *in)
 	}
 	out.Gateway = in.Gateway
-	out.Tailscale = in.Tailscale
 	if in.MCPConfigs != nil {
 		in, out := &in.MCPConfigs, &out.MCPConfigs
 		*out = make([]string, len(*in))

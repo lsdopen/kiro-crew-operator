@@ -34,9 +34,6 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
-    - jsonPath: .status.dashboardURL
-      name: Dashboard
-      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -193,10 +190,7 @@ spec:
                   hostname:
                     description: |-
                       Hostname is the tailnet node name, and therefore the MagicDNS name the
-                      desktop app connects to. Defaults to "kiro-crew-<instance>".
-                    type: string
-                  image:
-                    description: Image is the tailscale sidecar image.
+                      desktop app SSHes to. Defaults to "kiro-crew-<instance>".
                     type: string
                 type: object
             required:
@@ -268,9 +262,8 @@ spec:
                 x-kubernetes-list-type: map
               dashboardURL:
                 description: |-
-                  DashboardURL is the tailnet HTTPS address of the dashboard, published by
-                  tailscale serve. This is what the Kiro Crew desktop app connects to via
-                  New Connection Window; the app requires https for a non-loopback host.
+                  DashboardURL is always empty now: the dashboard is not published over
+                  HTTPS, and owners reach the crew by SSH to its tailnet hostname.
                 type: string
               observedGeneration:
                 description: ObservedGeneration is the .metadata.generation this status

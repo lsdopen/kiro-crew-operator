@@ -10,6 +10,11 @@ Rulings 1–11 are in. Rulings 7–11 cover phase 3e only
 (see [Editing a running crew](#editing-a-running-crew-3e)). Everything else
 in this document is decided.
 
+> **Superseded:** sign-in brokering (Decision 2, the `broker` package, the
+> `pods/exec` grant and its admission policy) was removed. Crews serve Tailscale
+> SSH from the gateway container and no longer publish a dashboard URL, so there
+> is nothing to open. The sections below describing it are historical.
+
 | # | Question | Ruling | Status |
 |---|---|---|---|
 | 1 | How does "Start" work outside a crew's schedule? | Latest event wins. Add one event field, `KiroCrewSpec.startedAt *metav1.Time`, set by the console on Start. `computeDesired` / `inUpWindow` (`internal/controller/schedule.go`) treat it as an Up event: desired is up when the most recent of {last Up, last Down, `startedAt`} is an Up or `startedAt`, so the next scheduled Down stops the crew with no deadline field. The requeue includes the next Down after `startedAt`. Start also clears `suspend`; "Stop" sets `suspend=true`, which still forces stop. With no schedule a crew always runs, so `startedAt` is irrelevant. | Changed |
@@ -247,7 +252,6 @@ Two homes, split by plane and blast radius:
 | `defaultSize` | `Size` | `light` | request form |
 | `defaultSchedule` | `*ScheduleSpec` | nil | request form |
 | `gateway.image` | string | operator's compiled `defaultGatewayImage` | crew controller, live (lets admins roll the fleet) |
-| `tailscale.image` | string | compiled `defaultTailscaleImage` | crew controller, live |
 | `mcpConfigRef` | string | "" | crew controller, when `KiroCrew.spec.mcpConfigRef` is empty |
 | `mcpConfigs` | `[]string` | [] | console MCP picker (3e); ConfigMap names in crewNamespace |
 | `signIn.sessionTTL` | `metav1.Duration` | 8h, max 20h | broker's `--ttl` |

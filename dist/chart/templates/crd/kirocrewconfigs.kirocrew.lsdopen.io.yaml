@@ -99,17 +99,6 @@ spec:
                 maxItems: 64
                 type: array
                 x-kubernetes-list-type: set
-              tailscale:
-                description: Tailscale overrides the tailscale sidecar image of every
-                  crew that sets none.
-                properties:
-                  image:
-                    description: Image is the full image reference, including its
-                      tag.
-                    maxLength: 512
-                    pattern: ^\S*$
-                    type: string
-                type: object
             type: object
             x-kubernetes-validations:
             - message: defaultSize must be one of allowedSizes

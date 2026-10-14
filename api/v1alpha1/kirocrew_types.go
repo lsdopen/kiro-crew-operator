@@ -93,16 +93,13 @@ type StorageSpec struct {
 // The node is deliberately USER-OWNED rather than tagged: its owner authenticates
 // it once, interactively, which is what makes the tailnet's autogroup:self usable.
 // That gives per-user isolation from a single static ACL grant
-// (autogroup:member -> autogroup:self on tcp:8080) with no per-user ACL entries,
+// (autogroup:member -> autogroup:self on tcp:22) plus one Tailscale SSH rule,
+// with no per-user ACL entries,
 // so onboarding another employee needs no policy change and the operator never
 // writes ACLs. A tagged node cannot do this: autogroup:self does not apply to tags.
 type TailscaleSpec struct {
-	// Image is the tailscale sidecar image.
-	// +optional
-	Image string `json:"image,omitempty"`
-
 	// Hostname is the tailnet node name, and therefore the MagicDNS name the
-	// desktop app connects to. Defaults to "kiro-crew-<instance>".
+	// desktop app SSHes to. Defaults to "kiro-crew-<instance>".
 	// +optional
 	Hostname string `json:"hostname,omitempty"`
 }
@@ -233,9 +230,8 @@ type KiroCrewStatus struct {
 	// +optional
 	TailnetLoginURL string `json:"tailnetLoginURL,omitempty"`
 
-	// DashboardURL is the tailnet HTTPS address of the dashboard, published by
-	// tailscale serve. This is what the Kiro Crew desktop app connects to via
-	// New Connection Window; the app requires https for a non-loopback host.
+	// DashboardURL is always empty now: the dashboard is not published over
+	// HTTPS, and owners reach the crew by SSH to its tailnet hostname.
 	// +optional
 	DashboardURL string `json:"dashboardURL,omitempty"`
 
@@ -260,7 +256,6 @@ type KiroCrewStatus struct {
 // +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".spec.size"
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Suspended",type=boolean,JSONPath=".status.suspended"
-// +kubebuilder:printcolumn:name="Dashboard",type=string,JSONPath=".status.dashboardURL"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 
 // KiroCrew is a single-owner Kiro Crew instance.

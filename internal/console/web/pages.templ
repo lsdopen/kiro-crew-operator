@@ -89,12 +89,6 @@ templ Crews(p Page) {
 						<td>
 							if c.DashboardURL != "" {
 								<span>{ c.DashboardURL }</span>
-								if p.CanOpen {
-									<form class="inline" method="post" action={ templ.SafeURL("/crews/" + c.Name + "/open") }>
-										<input type="hidden" name="csrf_token" value={ p.CSRF }/>
-										<button type="submit">Open</button>
-									</form>
-								}
 								<div class="muted">Requires Tailscale, connected as { p.Email }</div>
 							} else if c.LoginURL != "" {
 								<a href={ templ.URL(c.LoginURL) } rel="noopener noreferrer">Authenticate your crew node</a>
@@ -340,7 +334,6 @@ templ Config(p Page) {
 			</select>
 		</label>
 		<label>Gateway image (blank for the built-in) <input name="gateway_image" value={ p.Config.GatewayImage } maxlength="512"/></label>
-		<label>Tailscale image (blank for the built-in) <input name="tailscale_image" value={ p.Config.TailscaleImage } maxlength="512"/></label>
 		<label>MCP config ConfigMap (blank for none) <input name="mcp_config_ref" value={ p.Config.MCPConfigRef } maxlength="253"/></label>
 		<label>MCP configs admins may pick for a crew (one ConfigMap name per line) <textarea name="mcp_configs" rows="4" maxlength="4096">{ strings.Join(p.Config.MCPConfigs, "\n") }</textarea></label>
 		<button type="submit">Save</button>

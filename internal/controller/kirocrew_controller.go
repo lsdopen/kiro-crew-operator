@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -29,59 +30,33 @@ import (
 const (
 	// gatewayPort is where the Kiro Crew dashboard listens. It is bound to
 	// loopback only, so nothing on the pod network can reach it: the sole path in
-	// is the tailscale sidecar in the same pod, which is what makes the tailnet's
-	// access decision the only one that matters.
+	// is Tailscale SSH port forwarding from tailscaled in the same container.
 	gatewayPort = 8080
 
 	// dataMountPath is KIROCREW_HOME — SQLite databases, the encrypted Kiro token
 	// vault, and the workspace all live here, so it must be persistent.
 	dataMountPath = "/data"
 
-	// tailscaleStatePath holds the tailnet node identity. It is persisted so a
-	// pod restart rejoins as the same user-owned node instead of demanding that
-	// the owner authenticate interactively again.
-	tailscaleStatePath = "/var/lib/tailscale"
+	// tailscaleStateSubdir holds the node identity on the data volume, so restarts rejoin as the same node.
+	tailscaleStateSubdir = "tailscale"
+	tailscaleStatePath   = dataMountPath + "/" + tailscaleStateSubdir
 
-	// tailscaleSocketPath is tailscaled's default LocalAPI socket. The image
-	// defaults it to /tmp, but the gateway's own tailscale CLI only looks at
-	// this default path, so both must agree here for `tailscale serve` to work.
+	// tailscaleSocketPath is tailscaled's default LocalAPI socket, where the tailscale CLI looks.
 	tailscaleSocketDir  = "/var/run/tailscale"
 	tailscaleSocketPath = tailscaleSocketDir + "/tailscaled.sock"
 
-	// tailscaleSocketVolume is an emptyDir shared by the sidecar (which
-	// creates the LocalAPI socket) and the gateway (whose tailscale CLI reads
-	// it to resolve the tailnet name for its CSRF origin allowlist). Without
-	// a shared mount the gateway cannot reach the daemon and answers 403.
+	// tailscaleSocketVolume is a writable emptyDir for the socket; the container is non-root.
 	tailscaleSocketVolume = "tailscale-socket"
 
 	mcpConfigMountPath = "/etc/kiro-crew"
 
-	// configMountPath is where the config ConfigMap is mounted for the init
-	// container to read. The gateway itself does not read from here: its loader
-	// only reads config.local.json under KIROCREW_HOME, so the init container
-	// copies the ConfigMap into the data volume at that path.
-	configMountPath = "/etc/kiro-crew-config"
-
-	// localConfigFile is the filename the gateway's loader reads from
-	// KIROCREW_HOME. The ConfigMap is seeded here by the init container.
-	localConfigFile = "config.local.json"
-
-	// serveConfigFile is the ipn.ServeConfig the tailscale sidecar reads via
-	// TS_SERVE_CONFIG to publish the gateway on the tailnet over HTTPS.
-	serveConfigFile = "serve-config.json"
-
-	// serveConfigMountPath is where the ConfigMap serve config is mounted in
-	// the sidecar.
-	serveConfigMountPath = "/etc/tailscale"
-
 	// defaultGatewayImage is our derived image (see images/gateway/Containerfile):
-	// upstream's own gateway plus uv/uvx, node/npm/npx and the tailscale CLI.
+	// upstream's own gateway plus uv/uvx, node/npm/npx and tailscaled with Tailscale SSH.
 	// Upstream's stock image carries kiro-cli and the gateway but none of those
 	// runtimes, and the MCP ecosystem is distributed almost entirely as uvx and
 	// npx commands — so on the stock image a crew's MCP servers cannot start.
 	// Override spec.gateway.image to run upstream's image directly instead.
-	defaultGatewayImage   = "ghcr.io/lsdopen/kiro-crew-gateway:kirocrew-0.8.0"
-	defaultTailscaleImage = "ghcr.io/tailscale/tailscale:v1.102.5"
+	defaultGatewayImage = "ghcr.io/lsdopen/kiro-crew-gateway:kirocrew-0.8.0"
 
 	// gatewayHealthPath is upstream's health endpoint, used by its own
 	// HEALTHCHECK. It is not /healthz.
@@ -98,13 +73,11 @@ const (
 	// gateway's KIROCREW_HOME and the tailnet node identity both live on it.
 	dataVolumeName = "data"
 
-	// configVolumeName is the ConfigMap volume holding config.local.json and the
-	// serve config, mounted into the init container and the tailscale sidecar.
-	configVolumeName = "config"
+	// gatewayContainerName runs both the gateway and tailscaled.
+	gatewayContainerName = "gateway"
 
-	// tailscaleContainerName is the sidecar's name, and also the subPath its
-	// state occupies on the data volume.
-	tailscaleContainerName = "tailscale"
+	// tailnetJoinedMarker is logged by the image's entrypoint once the node has authenticated.
+	tailnetJoinedMarker = "[tailscale] joined the tailnet"
 
 	// tailnetPollInterval is how often to re-check a node that has not yet been
 	// authenticated by its owner.
@@ -131,12 +104,6 @@ type KiroCrewReconciler struct {
 	// Clientset reads pod logs, which is how an outstanding tailnet login URL is
 	// surfaced. Optional: without it the operator simply reports no login URL.
 	Clientset kubernetes.Interface
-
-	// TailnetDomain is the tailnet's MagicDNS suffix (for example
-	// "example-tailnet.ts.net"). It is operator-level configuration because every
-	// instance shares one tailnet, and it is what lets the operator publish the
-	// HTTPS address the desktop app connects to.
-	TailnetDomain string
 
 	// Now is the clock; nil means time.Now. Injected so schedule tests are deterministic.
 	Now func() time.Time
@@ -184,9 +151,6 @@ func (r *KiroCrewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err := r.reconcileServiceAccount(ctx, &crew); err != nil {
 		return ctrl.Result{}, fmt.Errorf("reconciling ServiceAccount: %w", err)
 	}
-	if err := r.reconcileConfigMap(ctx, &crew); err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconciling ConfigMap: %w", err)
-	}
 	if err := r.reconcileNetworkPolicy(ctx, &crew); err != nil {
 		return ctrl.Result{}, fmt.Errorf("reconciling NetworkPolicy: %w", err)
 	}
@@ -208,7 +172,7 @@ func (r *KiroCrewReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	logger.V(1).Info("Reconciled KiroCrew", "owner", crew.Spec.Owner, "size", crew.Spec.Size)
 
 	// While the node is still waiting for its owner's one-time authentication the
-	// login URL only exists in the sidecar's output, so poll until it is joined.
+	// login URL only exists in the gateway container's output, so poll until it is joined.
 	var requeue time.Duration
 	if crew.Status.TailnetLoginURL != "" {
 		requeue = tailnetPollInterval
@@ -256,55 +220,6 @@ func resolveSize(crew *kirocrewv1alpha1.KiroCrew) (corev1.ResourceRequirements, 
 		storage = *crew.Spec.Storage.Size
 	}
 	return resources, storage
-}
-
-// reconcileConfigMap delivers the gateway's config file.
-//
-// dashboard.tailscale.enabled is what makes the gateway derive and trust its own
-// tailnet origin at startup. Without it the dashboard answers 403 to a request
-// arriving on the MagicDNS name, so the desktop app could reach the pod and still
-// be refused. The ConfigMap is the source the init container copies to
-// KIROCREW_HOME/config.local.json, which is the only path the loader reads.
-func (r *KiroCrewReconciler) reconcileConfigMap(ctx context.Context, crew *kirocrewv1alpha1.KiroCrew) error {
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      instanceName(crew) + "-config",
-			Namespace: crew.Namespace,
-		},
-	}
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
-		cm.Labels = labelsFor(crew)
-		cm.Data = map[string]string{
-			// trust_identity + allowed_logins let the gateway log the owner in
-			// from their Tailscale identity (added to each request by serve), so
-			// no dashboard token is ever needed. The owner is the only allowed
-			// login; a verified peer whose login is not listed is denied.
-			localConfigFile: fmt.Sprintf(`{
-  "dashboard": {
-    "tailscale": {
-      "enabled": true,
-      "trust_identity": true,
-      "allowed_logins": [%q]
-    }
-  }
-}
-`, crew.Spec.Owner),
-			// ${TS_CERT_DOMAIN} is expanded by containerboot to the node's
-			// MagicDNS name, so the handler fronts tailnet HTTPS :443 onto the
-			// gateway on loopback.
-			serveConfigFile: fmt.Sprintf(`{
-  "TCP": { "443": { "HTTPS": true } },
-  "Web": {
-    "${TS_CERT_DOMAIN}:443": {
-      "Handlers": { "/": { "Proxy": "http://127.0.0.1:%d/" } }
-    }
-  }
-}
-`, gatewayPort),
-		}
-		return controllerutil.SetControllerReference(crew, cm, r.Scheme)
-	})
-	return err
 }
 
 func (r *KiroCrewReconciler) reconcileServiceAccount(ctx context.Context, crew *kirocrewv1alpha1.KiroCrew) error {
@@ -368,7 +283,6 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 		return fmt.Errorf("reading KiroCrewConfig: %w", err)
 	}
 	gatewayImage := firstNonEmpty(crew.Spec.Gateway.Image, cfg.Gateway.Image, defaultGatewayImage)
-	tailscaleImage := firstNonEmpty(crew.Spec.Tailscale.Image, cfg.Tailscale.Image, defaultTailscaleImage)
 	mcpConfigRef := firstNonEmpty(crew.Spec.MCPConfigRef, cfg.MCPConfigRef)
 	hostname := crew.Spec.Tailscale.Hostname
 	if hostname == "" {
@@ -411,9 +325,7 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 			{Name: "KIROCREW_HOME", Value: dataMountPath},
 			{Name: "KIROCREW_PORT", Value: fmt.Sprintf("%d", gatewayPort)},
 			// The image defaults to 0.0.0.0. Containers in a pod share a network
-			// namespace, so the tailscale sidecar still reaches the gateway on
-			// loopback, and binding loopback-only means the deny-all
-			// NetworkPolicy is not the sole thing keeping the pod network out.
+			// namespace, so tailscaled still reaches the gateway on loopback.
 			{Name: "KIROCREW_BIND", Value: "127.0.0.1"},
 			// Force the remote install shape. Left to its own detection the
 			// gateway sees a container and assumes a loopback OAuth callback can
@@ -422,6 +334,10 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 			// needs no callback port and is approved from any browser.
 			{Name: "KIRO_AUTH_INSTALL_SHAPE", Value: "remote"},
 			{Name: "KIROCREW_OWNER", Value: crew.Spec.Owner},
+			// Read by the image's entrypoint, which runs tailscaled with Tailscale SSH.
+			{Name: "TS_HOSTNAME", Value: hostname},
+			{Name: "TS_STATE_DIR", Value: tailscaleStatePath},
+			{Name: "TS_SOCKET", Value: tailscaleSocketPath},
 		}
 
 		gatewayMounts := []corev1.VolumeMount{
@@ -441,7 +357,7 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 		}
 
 		gateway := corev1.Container{
-			Name:            "gateway",
+			Name:            gatewayContainerName,
 			Image:           gatewayImage,
 			ImagePullPolicy: crew.Spec.Gateway.ImagePullPolicy,
 			Env:             env,
@@ -452,12 +368,6 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 				ReadOnlyRootFilesystem:   &readOnlyRootFS,
 				Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 			},
-			// No postStart hook publishes the dashboard. `kirocrew tailnet up`
-			// shells out to a tailscale CLI at a fixed absolute path and
-			// deliberately never consults PATH, and this image ships no such
-			// binary — so publishing is the sidecar's job via TS_SERVE_CONFIG
-			// below. All this container needs is to trust the tailnet origin,
-			// which it reads from config.
 			// The gateway binds loopback only (KIROCREW_BIND=127.0.0.1), so the
 			// pod network cannot reach it — by design. An HTTP probe cannot work:
 			// the kubelet dials the pod IP, not loopback, and gets refused. An
@@ -483,73 +393,23 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 			},
 		}
 
-		// Tailscale SSH is deliberately not enabled. The dashboard is the
-		// interface, reached by the desktop app over the tailnet, and kubectl
-		// exec already covers administrative access — so an SSH server on every
-		// crew would add a second way into a pod holding a user's Kiro token
-		// without adding a capability anyone needs.
-		tailscaleEnv := []corev1.EnvVar{
-			{Name: "TS_HOSTNAME", Value: hostname},
-			{Name: "TS_STATE_DIR", Value: tailscaleStatePath},
-			{Name: "TS_USERSPACE", Value: "true"},
-			{Name: "TS_SOCKET", Value: tailscaleSocketPath},
-			{Name: "TS_SERVE_CONFIG", Value: serveConfigMountPath + "/" + serveConfigFile},
-			// Store state on the data-volume subPath, not a kube Secret. The
-			// default kube-secret mode needs a pre-created Secret plus RBAC the
-			// operator does not grant; file state on persistent storage needs
-			// neither and survives restarts the same way.
-			{Name: "TS_KUBE_SECRET", Value: ""},
-		}
-
-		initRoot := int64(0)
-		initRunAsNonRoot := false
-		tailscale := corev1.Container{
-			Name:  tailscaleContainerName,
-			Image: tailscaleImage,
-			Env:   tailscaleEnv,
-			// Runs as root so containerboot can create /var/run/tailscale and put
-			// the LocalAPI socket at its default path. The gateway shells out to
-			// its own tailscale CLI, which only looks there, so a non-default
-			// socket would leave the gateway unable to drive `tailscale serve`.
-			SecurityContext: &corev1.SecurityContext{
-				RunAsNonRoot: &initRunAsNonRoot,
-				RunAsUser:    &initRoot,
-				RunAsGroup:   &initRoot,
-			},
-			VolumeMounts: []corev1.VolumeMount{
-				{Name: dataVolumeName, MountPath: tailscaleStatePath, SubPath: tailscaleContainerName},
-				{Name: configVolumeName, MountPath: serveConfigMountPath, ReadOnly: true},
-				{Name: tailscaleSocketVolume, MountPath: tailscaleSocketDir},
-			},
-			Resources: corev1.ResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse("50m"),
-					corev1.ResourceMemory: resource.MustParse("64Mi"),
-				},
-				Limits: corev1.ResourceList{
-					corev1.ResourceMemory: resource.MustParse("128Mi"),
-				},
-			},
-		}
-
 		// The gateway runs as uid 1000 and, at startup, chmods KIROCREW_HOME to
 		// 0700 — which only its owner may do. A freshly provisioned EBS volume
 		// comes up owned by root, and fsGroup only fixes group ownership, not
 		// the owner, so that chmod fails with EPERM and the gateway crashes.
-		// This init container runs as root to chown the volume to 1000, then
-		// seeds config.local.json where the loader reads it (the gateway never
-		// reads the ConfigMap mount directly).
+		// Also hands root-written tailnet state to uid 1000 and drops the config.local.json once seeded for tailscale serve.
+		initRoot := int64(0)
+		initRunAsNonRoot := false
 		seedInit := corev1.Container{
 			Name:    "init",
 			Image:   gatewayImage,
 			Command: []string{"sh", "-c"},
 			Args: []string{fmt.Sprintf(
-				"chown %d:%d %s && mkdir -p %s/%s && chown %d:%d %s/%s && cp %s/%s %s/%s && chown %d:%d %s/%s",
+				"chown %d:%d %s && mkdir -p %s && chown -R %d:%d %s && rm -f %s/config.local.json",
 				gatewayUID, gatewayGID, dataMountPath,
-				dataMountPath, tailscaleContainerName,
-				gatewayUID, gatewayGID, dataMountPath, tailscaleContainerName,
-				configMountPath, localConfigFile, dataMountPath, localConfigFile,
-				gatewayUID, gatewayGID, dataMountPath, localConfigFile,
+				tailscaleStatePath,
+				gatewayUID, gatewayGID, tailscaleStatePath,
+				dataMountPath,
 			)},
 			SecurityContext: &corev1.SecurityContext{
 				RunAsNonRoot:             &initRunAsNonRoot,
@@ -559,27 +419,16 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 			},
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: dataVolumeName, MountPath: dataMountPath},
-				{Name: configVolumeName, MountPath: configMountPath, ReadOnly: true},
 			},
 		}
 		sts.Spec.Template.Spec.InitContainers = []corev1.Container{seedInit}
 
-		sts.Spec.Template.Spec.Containers = []corev1.Container{gateway, tailscale}
+		sts.Spec.Template.Spec.Containers = []corev1.Container{gateway}
 
 		volumes := []corev1.Volume{
 			{
 				Name:         tailscaleSocketVolume,
 				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
-			},
-			{
-				Name: configVolumeName,
-				VolumeSource: corev1.VolumeSource{
-					ConfigMap: &corev1.ConfigMapVolumeSource{
-						LocalObjectReference: corev1.LocalObjectReference{
-							Name: instanceName(crew) + "-config",
-						},
-					},
-				},
 			},
 		}
 		if mcpConfigRef != "" {
@@ -655,8 +504,8 @@ func (r *KiroCrewReconciler) growStorage(ctx context.Context, crew *kirocrewv1al
 	return nil, nil
 }
 
-// reconcileStatus reports readiness, the tailnet dashboard address, and — while
-// the node is still unauthenticated — the login URL its owner must open.
+// reconcileStatus reports readiness and — while the node is still
+// unauthenticated — the login URL its owner must open.
 func (r *KiroCrewReconciler) reconcileStatus(ctx context.Context, crew *kirocrewv1alpha1.KiroCrew, desired desiredState, storage *metav1.Condition) error {
 	var sts appsv1.StatefulSet
 	err := r.Get(ctx, types.NamespacedName{Name: instanceName(crew), Namespace: crew.Namespace}, &sts)
@@ -681,18 +530,9 @@ func (r *KiroCrewReconciler) reconcileStatus(ctx context.Context, crew *kirocrew
 		patched.Status.NextTransition = &metav1.Time{Time: *desired.Next}
 	}
 
-	// Only advertise a dashboard address once the node is actually on the tailnet;
-	// publishing a MagicDNS name that does not resolve yet would just send the
-	// owner to a dead URL.
-	if joined && r.TailnetDomain != "" {
-		hostname := crew.Spec.Tailscale.Hostname
-		if hostname == "" {
-			hostname = instanceName(crew)
-		}
-		patched.Status.DashboardURL = fmt.Sprintf("https://%s.%s", hostname, r.TailnetDomain)
-	} else {
-		patched.Status.DashboardURL = ""
-	}
+	// Nothing is published over HTTPS any more: owners reach the crew by SSH to
+	// its tailnet hostname. Clear what an earlier version reported.
+	patched.Status.DashboardURL = ""
 
 	tailnetCondition := metav1.Condition{
 		Type:               kirocrewv1alpha1.ConditionTailnetJoined,
@@ -764,8 +604,8 @@ func (r *KiroCrewReconciler) reconcileStatus(ctx context.Context, crew *kirocrew
 	return r.Status().Patch(ctx, patched, client.MergeFrom(crew))
 }
 
-// tailnetLoginURL looks for an outstanding interactive-login URL in the tailscale
-// sidecar's output. An empty string means there is none to surface — either the
+// tailnetLoginURL looks for an outstanding interactive-login URL in the gateway
+// container's output. An empty string means there is none to surface — either the
 // node is already authenticated, or its logs are not readable yet.
 func (r *KiroCrewReconciler) tailnetLoginURL(ctx context.Context, crew *kirocrewv1alpha1.KiroCrew) string {
 	if r.Clientset == nil {
@@ -785,26 +625,34 @@ func (r *KiroCrewReconciler) tailnetLoginURL(ctx context.Context, crew *kirocrew
 		return ""
 	}
 
-	tail := int64(200)
+	tail := int64(500)
 	raw, err := r.Clientset.CoreV1().
 		Pods(crew.Namespace).
 		GetLogs(pods.Items[0].Name, &corev1.PodLogOptions{
-			Container: tailscaleContainerName,
+			Container: gatewayContainerName,
 			TailLines: &tail,
 		}).
 		DoRaw(ctx)
 	if err != nil {
-		logger.V(1).Info("Could not read tailscale logs", "error", err)
+		logger.V(1).Info("Could not read gateway logs", "error", err)
 		return ""
 	}
 
-	// The last occurrence wins: an earlier, already-consumed URL may still be in
-	// the log tail after a restart.
-	matches := tailnetLoginURLPattern.FindAllString(string(raw), -1)
+	return outstandingLoginURL(string(raw))
+}
+
+// outstandingLoginURL returns the last login URL in the logs unless the node
+// logged that it joined after it, in which case the URL has been consumed.
+func outstandingLoginURL(logs string) string {
+	matches := tailnetLoginURLPattern.FindAllStringIndex(logs, -1)
 	if len(matches) == 0 {
 		return ""
 	}
-	return matches[len(matches)-1]
+	last := matches[len(matches)-1]
+	if strings.LastIndex(logs, tailnetJoinedMarker) > last[0] {
+		return ""
+	}
+	return logs[last[0]:last[1]]
 }
 
 func upsertCondition(conditions *[]metav1.Condition, next metav1.Condition) {

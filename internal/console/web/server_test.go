@@ -46,11 +46,6 @@ type env struct {
 
 func newEnv(t *testing.T, domains []string, objs ...client.Object) *env {
 	t.Helper()
-	return newEnvBroker(t, domains, nil, objs...)
-}
-
-func newEnvBroker(t *testing.T, domains []string, br Opener, objs ...client.Object) *env {
-	t.Helper()
 	s := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(s); err != nil {
 		t.Fatal(err)
@@ -89,7 +84,7 @@ func newEnvBroker(t *testing.T, domains []string, br Opener, objs ...client.Obje
 	}
 	log := funcr.New(func(prefix, args string) { e.logs.WriteString(prefix + " " + args + "\n") }, funcr.Options{Verbosity: 10})
 	srv := &Server{
-		Provider: provider, Sealer: sealer, AllowedDomains: domains, Log: log, Broker: br,
+		Provider: provider, Sealer: sealer, AllowedDomains: domains, Log: log,
 		Store: &authz.Store{Client: k8s, Live: k8s, CrewNamespace: ns},
 	}
 	e.srv, e.h, e.iss, e.k8s, e.sealer, e.domains = srv, srv.Handler(), iss, k8s, sealer, domains

@@ -7,8 +7,9 @@
 # stock image a crew's MCP servers simply fail to start, which makes the
 # operator's own spec.mcpConfigRef field close to decorative.
 #
-# So this image adds uv/uvx, node/npm/npx, and the tailscale CLI, each copied
-# from its own official image rather than fetched at build time.
+# So this image adds uv/uvx, node/npm/npx, and tailscale + tailscaled (Tailscale
+# SSH runs inside this container), each copied from its own official image
+# rather than fetched at build time.
 #
 # Precise semver tags only (no digests, no rolling tags); Dependabot opens a PR per version.
 #
@@ -31,7 +32,7 @@ FROM docker.io/library/node:26.11.1-trixie-slim AS node
 FROM ghcr.io/kirodotdev/kirocrew:0.8.0
 
 # Upstream ends on USER kirocrew; installing needs root, and the final USER
-# below hands it back. ENTRYPOINT, CMD and WORKDIR are inherited untouched.
+# below hands it back. WORKDIR is inherited untouched.
 USER root
 
 # uv and uvx — the runtime for uvx-distributed MCP servers.
@@ -43,13 +44,14 @@ COPY --from=uv /uv /uvx /usr/local/bin/
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 
-# The tailscale CLI only. tailscaled stays in the sidecar: KiroCrew's entrypoint
-# owns PID 1 here, so this container cannot supervise a second daemon. The CLI
-# earns its place by making the gateway's own tailnet status and serve paths work
-# instead of reporting "Tailscale is not installed here" — the product resolves
-# it from a fixed allowlist of absolute paths and never consults PATH, and
-# /usr/local/bin/tailscale is on that list.
-COPY --from=tailscale /usr/local/bin/tailscale /usr/local/bin/tailscale
+# tailscale and tailscaled. The entrypoint below runs the daemon as the gateway's
+# own non-root user in userspace mode with Tailscale SSH enabled, so the SSH
+# shell lands where `kirocrew` and the data volume are. /usr/local/bin/tailscale
+# is also where the product looks for the CLI (a fixed allowlist, never PATH).
+COPY --from=tailscale /usr/local/bin/tailscale /usr/local/bin/tailscaled /usr/local/bin/
+
+# Supervises tailscaled next to the gateway and exits if either dies.
+COPY --chmod=755 images/gateway/kirocrew-tailscale-entrypoint /usr/local/bin/kirocrew-tailscale-entrypoint
 
 RUN set -eux; \
     # node is copied as a bare binary, but it is dynamically linked against more
@@ -70,13 +72,39 @@ RUN set -eux; \
     npm --version; \
     npx --version; \
     tailscale version --daemon=false; \
+    tailscaled --version; \
     # The agent runtime and the gateway must still be intact.
     command -v kiro-cli; \
-    command -v kirocrew
+    command -v kirocrew; \
+    # The desktop app runs `ssh <host> 'exec kirocrew token'` and looks for
+    # kirocrew under ~/.local/bin. Tailscale SSH sessions do not inherit the
+    # container environment, so the wrapper and the shell startup files source
+    # the file the entrypoint writes (KIROCREW_HOME and friends) first.
+    KIROCREW_BIN="$(command -v kirocrew)"; \
+    install -d -o kirocrew -g kirocrew /home/kirocrew/.local/bin; \
+    printf '%s\n' \
+        '#!/bin/sh' \
+        '[ -f "$HOME/.kirocrew-env" ] && . "$HOME/.kirocrew-env"' \
+        "exec ${KIROCREW_BIN} \"\$@\"" \
+        > /tmp/kirocrew-wrapper; \
+    install -o kirocrew -g kirocrew -m 755 /tmp/kirocrew-wrapper /home/kirocrew/.local/bin/kirocrew; \
+    rm /tmp/kirocrew-wrapper; \
+    for rc in .bashrc .profile; do \
+        { printf '%s\n' '[ -f "$HOME/.kirocrew-env" ] && . "$HOME/.kirocrew-env"'; cat "/home/kirocrew/$rc"; } > "/tmp/$rc"; \
+        install -o kirocrew -g kirocrew -m 644 "/tmp/$rc" "/home/kirocrew/$rc"; \
+        rm "/tmp/$rc"; \
+    done; \
+    # The wrapper must resolve to the real binary, not itself.
+    test "${KIROCREW_BIN}" != /home/kirocrew/.local/bin/kirocrew; \
+    /home/kirocrew/.local/bin/kirocrew --help >/dev/null
 
 USER kirocrew
 
+# tini reaps whatever Tailscale SSH sessions leave behind; the script is its child.
+ENTRYPOINT ["tini", "--", "kirocrew-tailscale-entrypoint"]
+CMD ["gateway"]
+
 LABEL org.opencontainers.image.title="kiro-crew-gateway" \
-      org.opencontainers.image.description="KiroCrew gateway with uv, Node and the Tailscale CLI, for the kiro-crew-operator" \
+      org.opencontainers.image.description="KiroCrew gateway with uv, Node and Tailscale SSH, for the kiro-crew-operator" \
       org.opencontainers.image.source="https://github.com/lsdopen/kiro-crew-operator" \
       org.opencontainers.image.base.name="ghcr.io/kirodotdev/kirocrew"

@@ -20,12 +20,15 @@ Tailscale's `autogroup:self`:
 ```hujson
 {
   "grants": [
-    { "src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["tcp:8080"] },
+    { "src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["tcp:22"] },
+  ],
+  "ssh": [
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self"], "users": ["kirocrew"] },
   ],
 }
 ```
 
-One static rule, written once by a human, gives every person access to exactly
+Two static rules, written once by a human, gives every person access to exactly
 their own crew and nobody else's. Onboarding the seventy-first employee needs no
 policy change, and the operator never touches your ACLs.
 
@@ -35,27 +38,23 @@ nodes are deliberately user-owned rather than provisioned with a machine
 credential.
 
 The gateway binds `127.0.0.1` only and a deny-all NetworkPolicy closes the pod
-network, so the tailnet's decision is the only one that can admit anybody.
+network, so the tailnet's decision is the only one that can admit anybody: the one
+way in is Tailscale SSH, served by a non-root `tailscaled` inside the gateway
+container, and the dashboard is reached through SSH port forwarding.
 
 See [docs/tailnet.md](docs/tailnet.md) for the policy and prerequisites.
 
 ## Connecting
 
-The dashboard is published on the tailnet by `tailscale serve`, so each instance
-gets an HTTPS address:
+Each crew runs Tailscale SSH inside the gateway container, as the same non-root
+user as the gateway, so the shell lands where `kirocrew` and the data volume are.
+The Kiro Crew **desktop app** adds a remote crew over SSH to the node's tailnet
+hostname (`spec.tailscale.hostname`, default `kiro-crew-<name>`): it forwards a
+local port to `127.0.0.1:8080` in the pod and signs in with the login token the
+`kirocrew` CLI mints there. Nothing is served over HTTPS, so `status.dashboardURL`
+is always empty.
 
-```console
-$ kubectl get kirocrew seagyn -o jsonpath='{.status.dashboardURL}'
-https://kiro-crew-seagyn.example-tailnet.ts.net
-```
-
-Open that in the Kiro Crew **desktop app** via *New Connection Window*. HTTPS
-matters: the app accepts `https://` to any host but plain `http://` only on
-loopback.
-
-Tailscale SSH is not enabled. The dashboard is the interface and `kubectl exec`
-covers administrative access, so an SSH server on every crew would be a second way
-into a pod holding someone's Kiro token without adding a capability anyone needs.
+The SSH login user is `kirocrew`; the tailnet `ssh` rule above must allow it.
 
 ## The gateway image
 
@@ -68,15 +67,12 @@ runtime — plus three things a crew on a cluster turns out to need:
 |-------|-----|
 | `uv`, `uvx` | Most MCP servers are distributed as `uvx` commands |
 | `node`, `npm`, `npx` | The rest are `npx` commands; also any JS/TS repo work |
-| `tailscale` (CLI only) | The gateway resolves it from a fixed allowlist of absolute paths and never consults `PATH`; without it, its own tailnet status and serve paths report "Tailscale is not installed here" |
+| `tailscale`, `tailscaled` | Tailscale SSH runs inside this container, supervised by a small entrypoint that exits if either process dies; `kirocrew` is also linked into `~/.local/bin` for the desktop app |
 
 Upstream's image is deliberately minimal — `ca-certificates`, `curl`, `git`,
 `ripgrep`, `tini`, `unzip` and Python — so on it a crew's MCP servers simply fail
 to start, which makes `spec.mcpConfigRef` close to decorative. Set
 `spec.gateway.image` to the upstream image to run it unmodified instead.
-
-`tailscaled` is **not** added: KiroCrew's entrypoint owns PID 1, so this container
-cannot supervise a second daemon. The daemon stays in the sidecar.
 
 Each base is a precise semver tag (`repo:X.Y.Z`), which Dependabot follows. Every added binary is
 executed during the build (`uv --version`, `node --version`, `tailscale version`,
@@ -166,8 +162,7 @@ crew offline.
 
 ## Getting started
 
-Prerequisites: an EKS cluster, a tailnet with MagicDNS and HTTPS certificates
-enabled, and the policy from [docs/tailnet.md](docs/tailnet.md) applied.
+Prerequisites: an EKS cluster, a tailnet with MagicDNS enabled, and the policy from [docs/tailnet.md](docs/tailnet.md) applied.
 
 ```sh
 # Install
