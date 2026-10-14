@@ -397,7 +397,7 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 		// 0700 — which only its owner may do. A freshly provisioned EBS volume
 		// comes up owned by root, and fsGroup only fixes group ownership, not
 		// the owner, so that chmod fails with EPERM and the gateway crashes.
-		// Also hands root-written tailnet state to uid 1000 and drops the config.local.json once seeded for tailscale serve.
+		// Also hands root-written tailnet state to uid 1000.
 		initRoot := int64(0)
 		initRunAsNonRoot := false
 		seedInit := corev1.Container{
@@ -405,11 +405,10 @@ func (r *KiroCrewReconciler) reconcileStatefulSet(ctx context.Context, crew *kir
 			Image:   gatewayImage,
 			Command: []string{"sh", "-c"},
 			Args: []string{fmt.Sprintf(
-				"chown %d:%d %s && mkdir -p %s && chown -R %d:%d %s && rm -f %s/config.local.json",
+				"chown %d:%d %s && mkdir -p %s && chown -R %d:%d %s",
 				gatewayUID, gatewayGID, dataMountPath,
 				tailscaleStatePath,
 				gatewayUID, gatewayGID, tailscaleStatePath,
-				dataMountPath,
 			)},
 			SecurityContext: &corev1.SecurityContext{
 				RunAsNonRoot:             &initRunAsNonRoot,
