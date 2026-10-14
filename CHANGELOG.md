@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/lsdopen/kiro-crew-operator/compare/v0.3.0...v0.3.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **controller:** stop init container deleting persisted CLI sign-in ([#76](https://github.com/lsdopen/kiro-crew-operator/issues/76)) ([22d36ee](https://github.com/lsdopen/kiro-crew-operator/commit/22d36ee80dc6536b3276f60dde64ec8a76f33fc5))
+
 ## [0.3.0](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.10...v0.3.0) (2026-10-14)
 
 
