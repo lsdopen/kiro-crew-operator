@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.10...v0.3.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* spec.tailscale.image and KiroCrewConfig spec.tailscale are removed, status.dashboardURL is always empty, and the tailnet policy needs a tcp:22 grant plus an ssh rule for user kirocrew in place of the tcp:8080 grant.
+
+### Features
+
+* Tailscale SSH in the gateway container, drop the sidecar ([#73](https://github.com/lsdopen/kiro-crew-operator/issues/73)) ([023cfaa](https://github.com/lsdopen/kiro-crew-operator/commit/023cfaa6bde763008536afb155ff5860cb56aefd))
+
 ## [0.2.10](https://github.com/lsdopen/kiro-crew-operator/compare/v0.2.9...v0.2.10) (2026-10-13)
 
 
