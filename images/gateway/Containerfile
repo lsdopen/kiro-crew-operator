@@ -60,8 +60,12 @@ RUN set -eux; \
     # to this image's glibc and is arch-correct on both amd64 and arm64, which
     # copying the .so out of the node stage would not be.
     apt-get update; \
-    apt-get install -y --no-install-recommends libatomic1; \
+    apt-get install -y --no-install-recommends libatomic1 locales; \
     rm -rf /var/lib/apt/lists/*; \
+    # ssh clients forward LC_* (macOS sends en_US.UTF-8); without the locale bash
+    # warns on every login. Generate a few, not locales-all; LANG stays C.UTF-8.
+    sed -i -E 's/^# *(en_US|en_GB|en_ZA)\.UTF-8 UTF-8/\1.UTF-8 UTF-8/' /etc/locale.gen; \
+    locale-gen; \
     ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm; \
     ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx; \
     # Fail the build now rather than ship an image whose tools are missing or
@@ -73,6 +77,9 @@ RUN set -eux; \
     npx --version; \
     tailscale version --daemon=false; \
     tailscaled --version; \
+    locale -a | grep -qix 'en_US.utf8'; \
+    locale -a | grep -qix 'en_GB.utf8'; \
+    locale -a | grep -qix 'en_ZA.utf8'; \
     # The agent runtime and the gateway must still be intact.
     command -v kiro-cli; \
     command -v kirocrew; \
