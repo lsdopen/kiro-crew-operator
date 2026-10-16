@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.2](https://github.com/lsdopen/kiro-crew-operator/compare/v0.3.1...v0.3.2) (2026-10-16)
+
+
+### Features
+
+* **gateway:** add gh, glab and playwright-cli to the image ([#83](https://github.com/lsdopen/kiro-crew-operator/issues/83)) ([be073d0](https://github.com/lsdopen/kiro-crew-operator/commit/be073d052db358661ba39da42de6c200cb307be5))
+
+
+### Bug Fixes
+
+* **gateway:** generate en_US/en_GB/en_ZA UTF-8 locales ([#82](https://github.com/lsdopen/kiro-crew-operator/issues/82)) ([7b3b4aa](https://github.com/lsdopen/kiro-crew-operator/commit/7b3b4aac2660568f34c35cbc819eb304cc09c49f))
+* **gateway:** make kiro-cli login work and persist across restarts ([#78](https://github.com/lsdopen/kiro-crew-operator/issues/78)) ([b9eec60](https://github.com/lsdopen/kiro-crew-operator/commit/b9eec603f2790c745ea5db6d2d51e2984b19e769))
+
+
+### Dependencies
+
+* bump astral-sh/uv from 0.13.0 to 0.13.1 in /images/gateway ([#81](https://github.com/lsdopen/kiro-crew-operator/issues/81)) ([a79c67a](https://github.com/lsdopen/kiro-crew-operator/commit/a79c67a21e77d32567eba7904974c55092a5ebd2))
+* bump tailscale/tailscale in /images/gateway ([#80](https://github.com/lsdopen/kiro-crew-operator/issues/80)) ([979fd97](https://github.com/lsdopen/kiro-crew-operator/commit/979fd972f214b82483e5cfcc65950dfb25e3ef4e))
+
 ## [0.3.1](https://github.com/lsdopen/kiro-crew-operator/compare/v0.3.0...v0.3.1) (2026-10-14)
 
 
