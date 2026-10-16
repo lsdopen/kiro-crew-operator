@@ -109,6 +109,34 @@ RUN set -eux; \
     test "${KIROCREW_BIN}" != /home/kirocrew/.local/bin/kirocrew; \
     /home/kirocrew/.local/bin/kirocrew --help >/dev/null
 
+# gh, glab and playwright-cli (with its browser). Neither CLI ships an image
+# Dependabot can track, so their versions are pinned here and bumped by hand.
+ARG TARGETARCH
+ARG GH_VERSION=2.102.0
+ARG GLAB_VERSION=1.123.0
+ARG PLAYWRIGHT_CLI_VERSION=0.1.22
+# Root-owned and outside $HOME, so the non-root user can read but not swap it.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
+RUN set -eux; \
+    curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz" \
+        | tar -xz -C /tmp; \
+    install -m 755 "/tmp/gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" /usr/local/bin/gh; \
+    rm -rf /tmp/gh_*; \
+    mkdir /tmp/glab; \
+    curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_${TARGETARCH}.tar.gz" \
+        | tar -xz -C /tmp/glab; \
+    install -m 755 /tmp/glab/bin/glab /usr/local/bin/glab; \
+    rm -rf /tmp/glab; \
+    npm install -g "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}"; \
+    playwright-cli install-browser --with-deps; \
+    rm -rf /var/lib/apt/lists/* /root/.npm; \
+    git --version; \
+    gh --version; \
+    glab --version; \
+    playwright-cli --version; \
+    test -n "$(ls -A "${PLAYWRIGHT_BROWSERS_PATH}")"
+
 USER kirocrew
 
 # tini reaps whatever Tailscale SSH sessions leave behind; the script is its child.
@@ -116,6 +144,6 @@ ENTRYPOINT ["tini", "--", "kirocrew-tailscale-entrypoint"]
 CMD ["gateway"]
 
 LABEL org.opencontainers.image.title="kiro-crew-gateway" \
-      org.opencontainers.image.description="KiroCrew gateway with uv, Node and Tailscale SSH, for the kiro-crew-operator" \
+      org.opencontainers.image.description="KiroCrew gateway with uv, Node, Tailscale SSH, gh, glab and playwright-cli, for the kiro-crew-operator" \
       org.opencontainers.image.source="https://github.com/lsdopen/kiro-crew-operator" \
       org.opencontainers.image.base.name="ghcr.io/kirodotdev/kirocrew"
