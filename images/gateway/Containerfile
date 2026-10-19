@@ -27,7 +27,7 @@ FROM ghcr.io/tailscale/tailscale:v1.104.1 AS tailscale
 
 # trixie-slim matches the base image's own Debian release, so the runtime's
 # glibc is the one node was built against.
-FROM docker.io/library/node:26.11.1-trixie-slim AS node
+FROM docker.io/library/node:26.12.0-trixie-slim AS node
 
 FROM ghcr.io/kirodotdev/kirocrew:0.8.0
 
