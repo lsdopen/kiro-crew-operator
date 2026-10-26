@@ -5,7 +5,7 @@
 # distroless/static publishes no semver tag, so :nonroot is the one rolling exception.
 #
 # Cross-compile on the build host instead of emulating the target (see Dockerfile).
-FROM --platform=${BUILDPLATFORM} docker.io/library/golang:1.27.1 AS builder
+FROM --platform=${BUILDPLATFORM} docker.io/library/golang:1.27.3 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
